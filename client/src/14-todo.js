@@ -1017,7 +1017,7 @@
           return;
         }
         markVisited('local');
-        window.dispatchEvent(new CustomEvent(DEVICE_SELECT_EVENT, { detail: { deviceId: 'local' } }));
+        window.dispatchEvent(new CustomEvent(DEVICE_SELECT_EVENT, { detail: { deviceId: 'local', reason: 'todo-open-local' } }));
         openNativeSession(card.sessionId, openSession);
       }
 
@@ -1471,7 +1471,7 @@
           }
           markVisited('local');
           // 若用户当前停留在远程设备标签页，先切回本机再调用原生 uiWorkspace.openSession。
-          window.dispatchEvent(new CustomEvent(DEVICE_SELECT_EVENT, { detail: { deviceId: 'local' } }));
+          window.dispatchEvent(new CustomEvent(DEVICE_SELECT_EVENT, { detail: { deviceId: 'local', reason: 'todo-open-local' } }));
           const result = openNativeSession(card.sessionId, openSession);
           setNotice(result.ok ? '' : (result.error || '切换会话失败'));
         }, [localDeviceId, openSession]);

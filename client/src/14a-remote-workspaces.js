@@ -3330,7 +3330,8 @@
           }
         }
 
-        const switchBackToLocalIfNeeded = () => {
+        // trigger 记录被拦截的原生动作；sessionId/recordCount 用于判断是否因远端列表暂未识别该会话而误切回本机。
+        const switchBackToLocalIfNeeded = (trigger = '', sessionId = '') => {
           if (store.activeDeviceId && store.activeDeviceId !== 'local') {
             cancelRemoteNavigation(store.activeDeviceId);
             store.createSessionSeq = (Number(store.createSessionSeq) || 0) + 1;
@@ -3338,7 +3339,14 @@
             pruneActiveInteractedSessions('');
             notifyStoreListeners();
             if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
-              window.dispatchEvent(new CustomEvent(DEVICE_SELECT_EVENT, { detail: { deviceId: 'local' } }));
+              window.dispatchEvent(new CustomEvent(DEVICE_SELECT_EVENT, { detail: {
+                deviceId: 'local',
+                reason: 'intercept',
+                trigger,
+                sessionId: typeof sessionId === 'string' ? sessionId : '',
+                knownRemote: false,
+                recordCount: store.nativeSessionById.size,
+              } }));
             }
           }
         };
@@ -3353,7 +3361,7 @@
               activateRemoteSession(remoteEntry.ws, remoteEntry.session);
               return;
             }
-            switchBackToLocalIfNeeded();
+            switchBackToLocalIfNeeded('openSession', sessionId);
             const res = origOpenSession(sessionId, ...rest);
             // 本地会话打开后自动滚动侧栏至该行并展开工作区
             scrollSidebarToSession(sessionId);
@@ -3374,7 +3382,7 @@
               await activateRemoteWorkspace(ws, { createNew: true });
               return;
             }
-            switchBackToLocalIfNeeded();
+            switchBackToLocalIfNeeded('openWorkspace');
             return origOpenWorkspace(workspaceId, ...rest);
           };
         }
@@ -3391,7 +3399,7 @@
               }
               return;
             }
-            switchBackToLocalIfNeeded();
+            switchBackToLocalIfNeeded('selectWorkspace');
             return origSelectWorkspace(workspaceId, ...rest);
           };
         }
@@ -3408,7 +3416,7 @@
               }
               return;
             }
-            switchBackToLocalIfNeeded();
+            switchBackToLocalIfNeeded('startSession');
             const started = origStartSession(workspaceId, ...rest);
             if (typeof featuresStore !== 'undefined' && featuresStore.snapshot.fullAccessByDefault) {
               void (async () => {
@@ -4422,7 +4430,8 @@
             pruneActiveInteractedSessions('');
             notifyStoreListeners();
             if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
-              window.dispatchEvent(new CustomEvent(DEVICE_SELECT_EVENT, { detail: { deviceId: 'local' } }));
+              // 侧栏捕获点击切回本机，标记来源便于和自动切回区分。
+              window.dispatchEvent(new CustomEvent(DEVICE_SELECT_EVENT, { detail: { deviceId: 'local', reason: 'sidebar-click' } }));
             }
           };
 

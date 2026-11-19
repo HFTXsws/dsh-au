@@ -513,3 +513,22 @@ test('all client lifecycle events and route reasons enter JSONL through bounded 
   assert.deepEqual(change.routes, [{ id: 'route-1', transport: 'tunnel', status: 'busy', online: true }]);
   assertRedacted(recorded);
 });
+
+test('select-local keeps switch source fields so automatic returns to local can be traced', () => {
+  const before = events().length;
+  recordClientEvent({
+    event: 'select-local', deviceId: 'local', reason: 'intercept', trigger: 'openSession',
+    sessionId: 'sess-1', fromDeviceId: 'example-mac', knownRemote: false, recordCount: 12,
+  });
+  recordClientEvent({ event: 'select-local', deviceId: 'local', trigger: 'https://host/?token=private_query_secret', knownRemote: 'false' });
+  const [traced, rejected] = events().slice(before);
+  assert.equal(traced.reason, 'intercept');
+  assert.equal(traced.trigger, 'openSession');
+  assert.equal(traced.sessionId, 'sess-1');
+  assert.equal(traced.fromDeviceId, 'example-mac');
+  assert.equal(traced.knownRemote, false);
+  assert.equal(traced.recordCount, 12);
+  assert.equal(rejected.trigger, '');
+  assert.equal(rejected.knownRemote, undefined);
+  assertRedacted([traced, rejected]);
+});

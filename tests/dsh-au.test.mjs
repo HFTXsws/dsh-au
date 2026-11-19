@@ -108,7 +108,8 @@ test('client mounts a root-resident top bar and preserves remote iframe instance
   assert.match(client, /ctx\.slots\.inject\('shell\.overlay'/);
   assert.match(client, /ReactDOM\.createPortal\(stage, hosts\.stageHost\)/);
   // 标签点击展开设备栏；键盘切换可显式保留当前折叠态。
-  assert.match(client, /const selectLocal = useCallback\(\(\{ preserveTopbar = false \} = \{\}\) => \{/);
+  // selectLocal 额外带来源诊断参数；这里只锁定 preserveTopbar 默认值仍为 false。
+  assert.match(client, /const selectLocal = useCallback\(\(\{ preserveTopbar = false[,}][^)]*\} = \{\}\) => \{/);
   assert.match(client, /const selectDevice = useCallback\(\(id, \{ preserveTopbar = false, targetUrl = '', navigateTopLevel = false \} = \{\}\) => \{/);
   assert.match(client, /if \(!preserveTopbar\) setTopbarCollapsed\(false\)/);
   assert.match(client, /function dispatchDeviceSwitch\(direction, preserveTopbar = true\)/);

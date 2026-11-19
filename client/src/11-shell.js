@@ -199,7 +199,12 @@
         const nextDeviceIds = new Set((snap.devices || []).map((device) => device.id));
         setState({ self: snap.self, devices: snap.devices || [], lanPeers: snap.lanPeers || [], remotes: snap.remotes || [] });
         // 默认留在本机；若手动设备被删除才回到本机对话。
-        setActiveId((current) => current && !nextDeviceIds.has(current) ? null : current);
+        setActiveId((current) => {
+          if (!current || nextDeviceIds.has(current)) return current;
+          // 这条路径不经过 selectLocal，单独留痕，否则“自动切回本机”在日志里无记录。
+          reportClientEvent('select-local', 'local', { reason: 'device-removed', fromDeviceId: current, recordCount: nextDeviceIds.size });
+          return null;
+        });
         // 设备删除时释放页面与已锁定地址；短暂离线不会进入这条清理通路。
         setOpenedIds((old) => old.filter((id) => nextDeviceIds.has(id)));
         const retainDevices = (old) => Object.fromEntries(Object.entries(old).filter(([id]) => nextDeviceIds.has(id)));
@@ -534,7 +539,12 @@
         if (plan.mode === 'suspend') {
           // 先卸掉远程页面，等解锁后的新代理地址再挂回来，避免沿用已经关掉的旧端口。
           setOpenedIds((old) => (old.length === 0 ? old : []));
-          setActiveId((current) => (plan.suspended.ids.includes(current) ? null : current));
+          setActiveId((current) => {
+            if (!plan.suspended.ids.includes(current)) return current;
+            // 锁屏断开远端同样绕过 selectLocal，补一条来源日志。
+            reportClientEvent('select-local', 'local', { reason: 'screen-lock-suspend', fromDeviceId: current || '' });
+            return null;
+          });
           setOpenedRouteUrls((old) => {
             if (!plan.suspended.ids.some((id) => old[id])) return old;
             const next = { ...old };
@@ -681,8 +691,17 @@
         }
       }, []);
 
-      const selectLocal = useCallback(({ preserveTopbar = false } = {}) => {
-        reportClientEvent('select-local', 'local', { fromRouteId: openedRouteIdsRef.current.get(activeId) || '', reason: 'show-local' });
+      // reason 标明是谁让画面回到本机（顶栏点击、快捷键、设备移除、外部事件等），用于排查“自动切回本机”。
+      const selectLocal = useCallback(({ preserveTopbar = false, reason = 'show-local', trigger = '', sessionId = '', knownRemote, recordCount } = {}) => {
+        reportClientEvent('select-local', 'local', {
+          fromRouteId: openedRouteIdsRef.current.get(activeId) || '',
+          reason,
+          trigger,
+          sessionId,
+          knownRemote,
+          recordCount,
+          fromDeviceId: activeId || '',
+        });
         clearStageTransition();
         setActiveId(null);
         if (!preserveTopbar) setTopbarCollapsed(false);
@@ -806,7 +825,7 @@
         const ids = [null, ...devices.map((device) => device.id)];
         const currentIndex = Math.max(0, ids.indexOf(activeId));
         const nextId = ids[(currentIndex + direction + ids.length) % ids.length];
-        if (nextId === null) selectLocal(options);
+        if (nextId === null) selectLocal({ ...options, reason: 'shortcut-cycle' });
         else {
           const nextDevice = devices.find((device) => device.id === nextId);
           selectDevice(nextId, { ...options, targetUrl: nextDevice?.targetUrl || '' });
@@ -829,7 +848,7 @@
 
       // 若已打开的远端后来确认是本机映射，立即回到本机而不是留下空白舞台。
       useEffect(() => {
-        if (activeId && !devices.some((device) => device.id === activeId)) selectLocal();
+        if (activeId && !devices.some((device) => device.id === activeId)) selectLocal({ reason: 'device-missing' });
       }, [activeId, devices, selectLocal]);
 
       // 外层的快捷键覆盖推送给每个受控 iframe（iframe 读不到外层的 localStorage）；iframe 加载完成时也会推一次。
@@ -859,7 +878,15 @@
           const requested = event.detail?.deviceId;
           if (typeof requested !== 'string' || !requested) return;
           if (requested === state.self?.deviceId || requested === 'local') {
-            selectLocal({ preserveTopbar: true });
+            // 外部派发方（待办、侧栏拦截等）可在 detail.reason 等字段里说明来源，原样带进日志。
+            selectLocal({
+              preserveTopbar: true,
+              reason: typeof event.detail?.reason === 'string' && event.detail.reason ? event.detail.reason : 'select-event',
+              trigger: typeof event.detail?.trigger === 'string' ? event.detail.trigger : '',
+              sessionId: typeof event.detail?.sessionId === 'string' ? event.detail.sessionId : '',
+              knownRemote: typeof event.detail?.knownRemote === 'boolean' ? event.detail.knownRemote : undefined,
+              recordCount: Number.isSafeInteger(event.detail?.recordCount) ? event.detail.recordCount : undefined,
+            });
             return;
           }
           if (event.detail?.skipInitialFocus === true && typeof INITIAL_FOCUS_VISITS_KEY === 'string') {
@@ -1092,7 +1119,7 @@
                 { key: 'tabs', className: 'dsh-au-tabs' },
                 h(
                   'button',
-                  { type: 'button', className: `dsh-au-tab ${activeId === null ? 'active' : ''}`, onClick: selectLocal, title: accessAlias ? `当前通过远程域名访问：${accessAlias}` : '返回本机对话' },
+                  { type: 'button', className: `dsh-au-tab ${activeId === null ? 'active' : ''}`, onClick: () => selectLocal({ reason: 'topbar-click' }), title: accessAlias ? `当前通过远程域名访问：${accessAlias}` : '返回本机对话' },
                   h('span', { className: `dsh-au-dot ${state.self?.statusV2 || state.self?.status || 'idle'}` }),
                   h('span', { className: 'dsh-au-tab-name' }, localLabel),
                   h('span', { className: 'dsh-au-badge' }, localBadge)
