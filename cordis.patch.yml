@@ -1,0 +1,4 @@
+# dsh bundle patch: inserts dsh-au into a profile's layer stack.
+- insert:
+    - id: dsh-au
+      name: 'dsh-au'

@@ -1,0 +1,90 @@
+{
+  "name": "dsh-au",
+  "version": "0.2.0",
+  "description": "Multi-device workspace, cross-device Todo, model quick-switcher, mobile drawer, local service manager & Claude/Codex agent control for DeepSeek Harness · DSH 多机工作台插件：本机/远程二级工作区、跨设备待办、模型快捷切换、移动端抽屉、本地服务管理与 Claude/Codex 控制入口",
+  "license": "MIT",
+  "author": "dsh-au contributors",
+  "keywords": [
+    "deepseek",
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "dsh-plugins",
+    "cordis",
+    "workspace",
+    "workbench",
+    "multi-device",
+    "model-switcher",
+    "claude",
+    "codex",
+    "mobile",
+    "todo"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/<your-github-username>/dsh-au.git"
+  },
+  "homepage": "https://github.com/<your-github-username>/dsh-au#readme",
+  "bugs": {
+    "url": "https://github.com/<your-github-username>/dsh-au/issues"
+  },
+  "engines": {
+    "node": ">=22.13.0",
+    "dsh": ">=0.2.0 <0.3.0"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org",
+    "access": "public"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "bin": {
+    "dsh-au-client-control": "./lib/client-control/cli.js"
+  },
+  "exports": {
+    ".": "./lib/index.js",
+    "./sync-repo": "./lib/sync-repo.js",
+    "./config-store": "./lib/config-store.js",
+    "./cloud-manifest": "./lib/cloud-manifest.js",
+    "./local-bindings": "./lib/local-bindings.js",
+    "./plugin-bundles": "./lib/plugin-bundles.js",
+    "./plugin-profile-state": "./lib/plugin-profile-state.js",
+    "./plugin-runtime": "./lib/plugin-runtime.js",
+    "./plugin-links": "./lib/plugin-links.js",
+    "./legacy-cleanup": "./lib/legacy-cleanup.js",
+    "./official-settings-sync": "./lib/official-settings-sync.js",
+    "./plugin-doctor": "./lib/plugin-doctor.js",
+    "./service-doctor": "./lib/service-doctor.js",
+    "./client": "./client/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-workspace",
+        "@deepseek-ai/dsh-client-ui-session",
+        "@deepseek-ai/dsh-client-ui-renderer"
+      ]
+    }
+  },
+  "files": [
+    "lib",
+    "client",
+    "cordis.patch.yml",
+    "README.md",
+    "package.json",
+    "LICENSE",
+    "sync"
+  ],
+  "scripts": {
+    "build:client": "node scripts/build-client.js",
+    "check:client": "node scripts/build-client.js --check",
+    "doctor": "node scripts/doctor.mjs",
+    "test": "node scripts/build-client.js --check && node --test tests/*.test.mjs"
+  }
+}

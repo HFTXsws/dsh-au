@@ -1,0 +1,15 @@
+node_modules/
+sync/local/
+sync/machines/*
+!sync/machines/.gitkeep
+sync/plugins/*
+!sync/plugins/.gitkeep
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+__pycache__/
+*.pyc
+
+# Graphify knowledge graph (local-only; rebuilt via post-rewrite hook)
+graphify-out/

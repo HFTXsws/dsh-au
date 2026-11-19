@@ -1,0 +1,669 @@
+{
+ "t": "div",
+ "p": {
+  "className": "dsh-au-mask",
+  "onClick": "[fn]"
+ },
+ "c": {
+  "t": "div",
+  "p": {
+   "aria-modal": "true",
+   "className": "dsh-au-wb-modal",
+   "role": "dialog"
+  },
+  "c": [
+   {
+    "t": "header",
+    "p": {
+     "className": "dsh-au-wb-head"
+    },
+    "c": [
+     {
+      "t": "input",
+      "p": {
+       "autoFocus": false,
+       "className": "dsh-au-wb-search",
+       "onChange": "[fn]",
+       "placeholder": "输入菜单序号、服务名或关键字检索...",
+       "value": ""
+      },
+      "c": null
+     },
+     {
+      "t": "div",
+      "p": {
+       "style": {
+        "display": "flex",
+        "alignItems": "center",
+        "gap": "8px"
+       }
+      },
+      "c": [
+       {
+        "t": "button",
+        "p": {
+         "className": "dsh-au-wb-pill on",
+         "onClick": "[fn]",
+         "title": "自动识别当前系统；点击可切换预览 Windows / macOS 专属菜单项",
+         "type": "button"
+        },
+        "c": "系统识别: macOS (.sh)"
+       },
+       {
+        "t": "button",
+        "p": {
+         "className": "dsh-au-btn",
+         "disabled": false,
+         "onClick": "[fn]",
+         "title": "立即重新检查后台服务运行状态（默认 1 小时自动缓存）",
+         "type": "button"
+        },
+        "c": "刷新"
+       },
+       {
+        "t": "button",
+        "p": {
+         "className": "dsh-au-btn",
+         "onClick": "[fn]",
+         "type": "button"
+        },
+        "c": "关闭 (Esc)"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "t": "div",
+    "p": {
+     "className": "dsh-au-wb-body"
+    },
+    "c": [
+     {
+      "t": "nav",
+      "p": {
+       "className": "dsh-au-wb-nav"
+      },
+      "c": [
+       {
+        "t": "button",
+        "p": {
+         "className": "dsh-au-wb-navbtn ",
+         "key": "nav-fav",
+         "onClick": "[fn]",
+         "type": "button"
+        },
+        "c": [
+         {
+          "t": "span",
+          "p": {
+           "className": "dsh-au-nav-main"
+          },
+          "c": [
+           {
+            "t": "span",
+            "p": {
+             "className": "dsh-au-nav-icon",
+             "key": "icon"
+            },
+            "c": {
+             "t": "StarIcon",
+             "p": {},
+             "c": null
+            }
+           },
+           {
+            "t": "span",
+            "p": {
+             "className": "dsh-au-nav-label",
+             "key": "label"
+            },
+            "c": "常用收藏"
+           }
+          ]
+         },
+         {
+          "t": "span",
+          "p": {
+           "className": "dsh-au-nav-count"
+          },
+          "c": "3"
+         }
+        ]
+       },
+       {
+        "t": "button",
+        "p": {
+         "className": "dsh-au-wb-navbtn active",
+         "key": "nav-services",
+         "onClick": "[fn]",
+         "type": "button"
+        },
+        "c": [
+         {
+          "t": "span",
+          "p": {
+           "className": "dsh-au-nav-main"
+          },
+          "c": [
+           {
+            "t": "span",
+            "p": {
+             "className": "dsh-au-nav-icon",
+             "key": "icon"
+            },
+            "c": {
+             "t": "ServicesIcon",
+             "p": {},
+             "c": null
+            }
+           },
+           {
+            "t": "span",
+            "p": {
+             "className": "dsh-au-nav-label",
+             "key": "label"
+            },
+            "c": "后台服务管理"
+           }
+          ]
+         },
+         {
+          "t": "span",
+          "p": {
+           "className": "dsh-au-nav-count"
+          },
+          "c": "2"
+         }
+        ]
+       },
+       {
+        "t": "button",
+        "p": {
+         "className": "dsh-au-wb-navbtn ",
+         "key": "nav-plugins",
+         "onClick": "[fn]",
+         "type": "button"
+        },
+        "c": [
+         {
+          "t": "span",
+          "p": {
+           "className": "dsh-au-nav-main"
+          },
+          "c": [
+           {
+            "t": "span",
+            "p": {
+             "className": "dsh-au-nav-icon",
+             "key": "icon"
+            },
+            "c": {
+             "t": "PluginIcon",
+             "p": {},
+             "c": null
+            }
+           },
+           {
+            "t": "span",
+            "p": {
+             "className": "dsh-au-nav-label",
+             "key": "label"
+            },
+            "c": "插件管理"
+           }
+          ]
+         },
+         {
+          "t": "span",
+          "p": {
+           "className": "dsh-au-nav-count"
+          },
+          "c": "2"
+         }
+        ]
+       },
+       {
+        "t": "button",
+        "p": {
+         "className": "dsh-au-wb-navbtn ",
+         "key": "nav-all",
+         "onClick": "[fn]",
+         "type": "button"
+        },
+        "c": [
+         {
+          "t": "span",
+          "p": {
+           "className": "dsh-au-nav-main"
+          },
+          "c": [
+           {
+            "t": "span",
+            "p": {
+             "className": "dsh-au-nav-icon",
+             "key": "icon"
+            },
+            "c": {
+             "t": "CommandMenuIcon",
+             "p": {},
+             "c": null
+            }
+           },
+           {
+            "t": "span",
+            "p": {
+             "className": "dsh-au-nav-label",
+             "key": "label"
+            },
+            "c": "全部菜单指令"
+           }
+          ]
+         },
+         {
+          "t": "span",
+          "p": {
+           "className": "dsh-au-nav-count"
+          },
+          "c": "6"
+         }
+        ]
+       },
+       {
+        "t": "button",
+        "p": {
+         "className": "dsh-au-wb-navbtn ",
+         "key": "basic",
+         "onClick": "[fn]",
+         "type": "button"
+        },
+        "c": [
+         {
+          "t": "span",
+          "p": {
+           "className": "dsh-au-nav-main"
+          },
+          "c": [
+           {
+            "t": "span",
+            "p": {
+             "className": "dsh-au-nav-icon",
+             "key": "icon"
+            },
+            "c": {
+             "t": "span",
+             "p": {
+              "className": "dsh-au-nav-dot"
+             },
+             "c": null
+            }
+           },
+           {
+            "t": "span",
+            "p": {
+             "className": "dsh-au-nav-label",
+             "key": "label"
+            },
+            "c": "基础"
+           }
+          ]
+         },
+         {
+          "t": "span",
+          "p": {
+           "className": "dsh-au-nav-count"
+          },
+          "c": "4"
+         }
+        ]
+       },
+       {
+        "t": "button",
+        "p": {
+         "className": "dsh-au-wb-navbtn ",
+         "key": "cursor",
+         "onClick": "[fn]",
+         "type": "button"
+        },
+        "c": [
+         {
+          "t": "span",
+          "p": {
+           "className": "dsh-au-nav-main"
+          },
+          "c": [
+           {
+            "t": "span",
+            "p": {
+             "className": "dsh-au-nav-icon",
+             "key": "icon"
+            },
+            "c": {
+             "t": "span",
+             "p": {
+              "className": "dsh-au-nav-dot"
+             },
+             "c": null
+            }
+           },
+           {
+            "t": "span",
+            "p": {
+             "className": "dsh-au-nav-label",
+             "key": "label"
+            },
+            "c": "Cursor"
+           }
+          ]
+         },
+         {
+          "t": "span",
+          "p": {
+           "className": "dsh-au-nav-count"
+          },
+          "c": "2"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": "section",
+      "p": {
+       "className": "dsh-au-wb-center"
+      },
+      "c": {
+       "t": "#fragment",
+       "p": {},
+       "c": [
+        {
+         "t": "div",
+         "p": {
+          "key": "tabs",
+          "style": {
+           "display": "flex",
+           "gap": "7px",
+           "paddingBottom": "3px",
+           "borderBottom": "1px solid #1f2637"
+          }
+         },
+         "c": [
+          {
+           "t": "button",
+           "p": {
+            "className": "dsh-au-wb-pill ",
+            "key": "local",
+            "onClick": "[fn]",
+            "type": "button"
+           },
+           "c": "本机服务 2"
+          },
+          {
+           "t": "button",
+           "p": {
+            "className": "dsh-au-wb-pill sel",
+            "key": "backup",
+            "onClick": "[fn]",
+            "type": "button"
+           },
+           "c": "云备份 2"
+          },
+          {
+           "t": "button",
+           "p": {
+            "className": "dsh-au-wb-pill ",
+            "key": "cloud",
+            "onClick": "[fn]",
+            "type": "button"
+           },
+           "c": "云服务 2"
+          }
+         ]
+        },
+        {
+         "t": "section",
+         "p": {
+          "className": "dsh-au-quota-shell",
+          "key": "notice"
+         },
+         "c": [
+          {
+           "t": "strong",
+           "p": {
+            "key": "title"
+           },
+           "c": "云备份 · 共 2 份"
+          },
+          {
+           "t": "span",
+           "p": {
+            "key": "text",
+            "style": {
+             "color": "#94a3b8",
+             "fontSize": "15px"
+            }
+           },
+           "c": "当前使用：machines/example-macbook-pro.json · 备份随仓库提交；切换只改本机指针，不动任何一份备份内容。"
+          }
+         ]
+        },
+        {
+         "t": "div",
+         "p": {
+          "className": "dsh-au-wb-grid",
+          "key": "grid"
+         },
+         "c": [
+          {
+           "t": "div",
+           "p": {
+            "className": "dsh-au-wb-card selected",
+            "key": "example-macbook-pro"
+           },
+           "c": [
+            {
+             "t": "div",
+             "p": {
+              "className": "dsh-au-card-head",
+              "key": "head"
+             },
+             "c": [
+              {
+               "t": "span",
+               "p": {
+                "className": "dsh-au-card-id",
+                "key": "id"
+               },
+               "c": "example-macbook-pro"
+              },
+              {
+               "t": "span",
+               "p": {
+                "className": "dsh-au-chip",
+                "data-tone": "emerald",
+                "key": "state"
+               },
+               "c": "✓ 当前使用"
+              }
+             ]
+            },
+            {
+             "t": "div",
+             "p": {
+              "className": "dsh-au-card-title",
+              "key": "title"
+             },
+             "c": "小贞林的 MacBook Pro"
+            },
+            {
+             "t": "div",
+             "p": {
+              "className": "dsh-au-card-desc",
+              "key": "desc"
+             },
+             "c": "2 个服务 · 收藏 2 项 · 插件 2 个 · 更新于 2026-10-27 02:55"
+            }
+           ]
+          },
+          {
+           "t": "div",
+           "p": {
+            "className": "dsh-au-wb-card ",
+            "key": "testbook"
+           },
+           "c": [
+            {
+             "t": "div",
+             "p": {
+              "className": "dsh-au-card-head",
+              "key": "head"
+             },
+             "c": [
+              {
+               "t": "span",
+               "p": {
+                "className": "dsh-au-card-id",
+                "key": "id"
+               },
+               "c": "testbook"
+              },
+              {
+               "t": "span",
+               "p": {
+                "className": "dsh-au-chip",
+                "data-tone": "blue",
+                "key": "state"
+               },
+               "c": "本机主机名匹配"
+              }
+             ]
+            },
+            {
+             "t": "div",
+             "p": {
+              "className": "dsh-au-card-title",
+              "key": "title"
+             },
+             "c": "测试机"
+            },
+            {
+             "t": "div",
+             "p": {
+              "className": "dsh-au-card-desc",
+              "key": "desc"
+             },
+             "c": "1 个服务 · 收藏 3 项 · 插件 0 个 · 更新于 2026-10-20 11:00"
+            },
+            {
+             "t": "div",
+             "p": {
+              "className": "dsh-au-card-foot",
+              "key": "foot"
+             },
+             "c": [
+              {
+               "t": "button",
+               "p": {
+                "className": "dsh-au-card-btn",
+                "disabled": false,
+                "key": "switch",
+                "onClick": "[fn]",
+                "title": "",
+                "type": "button"
+               },
+               "c": "切换使用"
+              }
+             ]
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "t": "aside",
+      "p": {
+       "className": "dsh-au-wb-inspector"
+      },
+      "c": {
+       "t": "#fragment",
+       "p": {},
+       "c": [
+        {
+         "t": "div",
+         "p": {
+          "className": "dsh-au-insp-head",
+          "key": "head"
+         },
+         "c": [
+          {
+           "t": "span",
+           "p": {
+            "className": "dsh-au-insp-name",
+            "key": "name",
+            "title": "小贞林的 MacBook Pro"
+           },
+           "c": "小贞林的 MacBook Pro"
+          }
+         ]
+        },
+        {
+         "t": "div",
+         "p": {
+          "className": "dsh-au-insp-id",
+          "key": "meta"
+         },
+         "c": "example-macbook-pro"
+        },
+        {
+         "t": "div",
+         "p": {
+          "className": "dsh-au-insp-desc",
+          "key": "desc"
+         },
+         "c": "2 个服务 · 收藏 2 项"
+        },
+        {
+         "t": "div",
+         "p": {
+          "className": "dsh-au-insp-desc",
+          "key": "plugins"
+         },
+         "c": "插件：@weibaohui/dsh-continue、dsh-market"
+        },
+        {
+         "t": "div",
+         "p": {
+          "className": "dsh-au-note",
+          "key": "note"
+         },
+         "c": "文件 dsh-au/sync/machines/example-macbook-pro.json，随仓库提交；切换只改本机 local/active.json 指针，不改任何备份内容。"
+        }
+       ]
+      }
+     }
+    ]
+   },
+   {
+    "t": "footer",
+    "p": {
+     "className": "dsh-au-wb-foot"
+    },
+    "c": [
+     {
+      "t": "span",
+      "p": {},
+      "c": "支持序号直达 (11-71) · 双击无参卡片直接执行 · 后台服务独立于 DSH 运行，支持按电脑保存自启组合"
+     },
+     {
+      "t": "span",
+      "p": {},
+      "c": "本机: TestBook · SSOT: scripts/menu.json"
+     }
+    ]
+   }
+  ]
+ }
+}

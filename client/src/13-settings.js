@@ -1,0 +1,2036 @@
+    /** 内置功能开关存宿主机配置；新建目标限制默认关闭，不投射到其他主机。 */
+    const featuresStore = {
+      snapshot: {
+        todo: false, fullAccessByDefault: false, blockGoalCreation: false, disconnectRemotesOnLock: false, goalCreationError: '',
+        loaded: false, busy: false, error: '',
+        /** 自动续跑默认关闭，且没有规则。 */
+        autoContinue: { enabled: false, retryDelaySec: 60, maxRetries: 5, compactOnDisconnect: true, continueOnTruncate: true, prompt: '继续', rules: [] },
+      },
+      listeners: new Set(),
+    };
+
+    function publishFeatures(patch) {
+      featuresStore.snapshot = { ...featuresStore.snapshot, ...patch };
+      for (const listener of featuresStore.listeners) listener(featuresStore.snapshot);
+    }
+
+    function useFeatures() {
+      const [snapshot, setSnapshot] = useState(featuresStore.snapshot);
+      useEffect(() => {
+        featuresStore.listeners.add(setSnapshot);
+        setSnapshot(featuresStore.snapshot);
+        return () => { featuresStore.listeners.delete(setSnapshot); };
+      }, []);
+      return snapshot;
+    }
+
+    function broadcastFeaturesToControlledFrames() {
+      if (typeof document === 'undefined') return;
+      try {
+        const frames = document.querySelectorAll('iframe.dsh-au-iframe');
+        for (const frame of frames) {
+          if (frame?.contentWindow && typeof postShortcutConfig === 'function') {
+            postShortcutConfig(frame.contentWindow);
+          }
+        }
+      } catch {}
+    }
+
+    async function loadFeatures() {
+      try {
+        const res = await callApi('getFeatures');
+        if (res?.ok && res.features) {
+          if (res.clientPreferences && typeof res.clientPreferences === 'object') {
+            if (typeof res.clientPreferences.mobileEnabled === 'boolean') {
+              writeMobileFeatureEnabled(res.clientPreferences.mobileEnabled);
+            }
+            if (res.clientPreferences.shortcutOverrides && typeof res.clientPreferences.shortcutOverrides === 'object') {
+              setShortcutOverrides(normalizeShortcutOverrides(res.clientPreferences.shortcutOverrides));
+            }
+          }
+          /** 兜底归一化 autoContinue，确保每个字段都有合法默认值 */
+          const ac = res.autoContinue && typeof res.autoContinue === 'object' ? res.autoContinue : {};
+          const def = featuresStore.snapshot.autoContinue;
+          const rules = Array.isArray(ac.rules) ? ac.rules : [];
+          const autoContinue = {
+            enabled:            typeof ac.enabled            === 'boolean' ? ac.enabled            : def.enabled,
+            retryDelaySec:      typeof ac.retryDelaySec      === 'number'  ? ac.retryDelaySec      : def.retryDelaySec,
+            maxRetries:         typeof ac.maxRetries         === 'number'  ? ac.maxRetries         : def.maxRetries,
+            compactOnDisconnect:typeof ac.compactOnDisconnect=== 'boolean' ? ac.compactOnDisconnect: def.compactOnDisconnect,
+            continueOnTruncate: typeof ac.continueOnTruncate === 'boolean' ? ac.continueOnTruncate : def.continueOnTruncate,
+            prompt:             typeof ac.prompt             === 'string'  ? ac.prompt             : def.prompt,
+            rules,
+          };
+          publishFeatures({
+            todo: res.features.todo !== false,
+            fullAccessByDefault: res.features.fullAccessByDefault === true,
+            blockGoalCreation: res.features.blockGoalCreation === true,
+            disconnectRemotesOnLock: res.features.disconnectRemotesOnLock === true,
+            goalCreationError: typeof res.goalCreationError === 'string' ? res.goalCreationError : '',
+            loaded: true,
+            error: '',
+            autoContinue,
+          });
+        }
+      } catch {
+        publishFeatures({ error: '读取功能开关失败' });
+      }
+    }
+
+    async function saveTodoFeature(next) {
+      publishFeatures({ busy: true, error: '' });
+      try {
+        const res = await callApi('saveFeatures', { todo: Boolean(next) });
+        if (!res?.ok) throw new Error(res?.error || 'save failed');
+        publishFeatures({ todo: res.features.todo !== false, busy: false });
+        broadcastFeaturesToControlledFrames();
+      } catch {
+        publishFeatures({ busy: false, error: '保存失败，请稍后重试' });
+      }
+    }
+
+    async function saveFullAccessFeature(next) {
+      publishFeatures({ busy: true, error: '' });
+      try {
+        const res = await callApi('saveFeatures', { fullAccessByDefault: Boolean(next) });
+        if (!res?.ok) throw new Error(res?.error || 'save failed');
+        publishFeatures({
+          todo: res.features.todo !== false,
+          fullAccessByDefault: res.features.fullAccessByDefault === true,
+          busy: false,
+        });
+        broadcastFeaturesToControlledFrames();
+      } catch {
+        publishFeatures({ busy: false, error: '保存失败，请稍后重试' });
+      }
+    }
+
+    /** 只保存这台电脑的锁屏断开开关，不写进会同步到其他电脑的偏好。 */
+    async function saveLockRemoteFeature(next) {
+      publishFeatures({ busy: true, error: '' });
+      try {
+        const res = await callApi('saveFeatures', { disconnectRemotesOnLock: Boolean(next) });
+        if (!res?.ok || typeof res.features?.disconnectRemotesOnLock !== 'boolean') {
+          throw new Error(res?.error || '保存失败，请稍后重试');
+        }
+        publishFeatures({
+          disconnectRemotesOnLock: res.features.disconnectRemotesOnLock,
+          busy: false,
+        });
+      } catch (error) {
+        publishFeatures({ busy: false, error: error?.message || '保存失败，请稍后重试' });
+      }
+    }
+
+    /** 仅保存当前宿主的新建目标限制；未确认的回执不能冒充已保存。 */
+    async function saveGoalCreationFeature(next) {
+      publishFeatures({ busy: true, error: '' });
+      try {
+        const res = await callApi('saveFeatures', { blockGoalCreation: Boolean(next) });
+        if (!res?.ok || typeof res.features?.blockGoalCreation !== 'boolean') {
+          throw new Error(res?.error || '保存失败，请稍后重试');
+        }
+        publishFeatures({
+          blockGoalCreation: res.features.blockGoalCreation,
+          goalCreationError: typeof res.goalCreationError === 'string' ? res.goalCreationError : '',
+          busy: false,
+        });
+      } catch (error) {
+        publishFeatures({ busy: false, error: error?.message || '保存失败，请稍后重试' });
+      }
+    }
+
+    /** 保存自动续跑配置；合并当前快照与 patch，成功后用服务端回执更新状态并短暂提示。 */
+    async function saveAutoContinueFeature(patch) {
+      publishFeatures({ busy: true, error: '', autoContinueSaved: false });
+      try {
+        const current = featuresStore.snapshot.autoContinue;
+        const nextAutoContinue = { ...current, ...patch };
+        const res = await callApi('saveFeatures', { autoContinue: nextAutoContinue });
+        if (!res?.ok) throw new Error(res?.error || '保存失败，请稍后重试');
+        // 用服务端回执中的 autoContinue 归一化更新（兜底沿用 nextAutoContinue）
+        const ac = res.autoContinue && typeof res.autoContinue === 'object' ? res.autoContinue : nextAutoContinue;
+        const def = featuresStore.snapshot.autoContinue;
+        const rules = Array.isArray(ac.rules) ? ac.rules : (Array.isArray(nextAutoContinue.rules) ? nextAutoContinue.rules : []);
+        publishFeatures({
+          busy: false,
+          autoContinueSaved: true,
+          autoContinue: {
+            enabled:            typeof ac.enabled            === 'boolean' ? ac.enabled            : def.enabled,
+            retryDelaySec:      typeof ac.retryDelaySec      === 'number'  ? ac.retryDelaySec      : def.retryDelaySec,
+            maxRetries:         typeof ac.maxRetries         === 'number'  ? ac.maxRetries         : def.maxRetries,
+            compactOnDisconnect:typeof ac.compactOnDisconnect=== 'boolean' ? ac.compactOnDisconnect: def.compactOnDisconnect,
+            continueOnTruncate: typeof ac.continueOnTruncate === 'boolean' ? ac.continueOnTruncate : def.continueOnTruncate,
+            prompt:             typeof ac.prompt             === 'string'  ? ac.prompt             : def.prompt,
+            rules,
+          },
+        });
+        // 短暂清除「已保存」提示
+        setTimeout(() => { publishFeatures({ autoContinueSaved: false }); }, 3000);
+        return true;
+      } catch (error) {
+        publishFeatures({ busy: false, error: error?.message || '保存失败，请稍后重试' });
+        return false;
+      }
+    }
+
+    /** 设置条目：标题与开关一行，下面依次是说明、补充、注释和按钮。 */
+    function SettingsItem({ title, description, extra, hint, control, actions }) {
+      const hints = (Array.isArray(hint) ? hint : [hint]).filter((line) => line != null && line !== '');
+      const desc = description == null || description === ''
+        ? []
+        : (Array.isArray(description) ? description : [description]);
+      return h(
+        'div',
+        { className: 'dsh-au-settings-item' },
+        h(
+          'div',
+          { className: 'dsh-au-settings-item-head' },
+          h('span', { className: 'dsh-au-settings-title' }, title),
+          control || null
+        ),
+        desc.length ? h('p', { className: 'dsh-au-settings-desc' }, ...desc) : null,
+        extra ? h('div', { className: 'dsh-au-settings-item-extra' }, extra) : null,
+        ...hints.map((line) => h('p', { className: 'dsh-au-settings-hint' }, line)),
+        actions ? h('div', { className: 'dsh-au-settings-item-actions' }, actions) : null
+      );
+    }
+
+    function FeatureSwitchGroup({ id, heading, title, description, checked, disabled, onToggle, hint }) {
+      const titleId = `dsh-au-feature-${id}-title`;
+      return h(
+        'section',
+        { className: 'dsh-au-settings-group', 'aria-labelledby': titleId },
+        h('h3', { id: titleId }, heading),
+        h(SettingsItem, {
+          title,
+          description,
+          hint,
+          control: h(
+            'button',
+            {
+              type: 'button',
+              role: 'switch',
+              className: 'dsh-au-switch',
+              'aria-checked': checked,
+              'aria-labelledby': titleId,
+              disabled,
+              onClick: onToggle,
+            },
+            h('span', { className: 'dsh-au-switch-knob', 'aria-hidden': 'true' })
+          ),
+        })
+      );
+    }
+
+    function TodoFeatureGroup() {
+      const features = useFeatures();
+      return h(FeatureSwitchGroup, {
+        id: 'todo',
+        heading: '待办面板',
+        title: '启用待办面板',
+        description: '在对话顶部显示跨设备的对话待办面板，可排序、暂存并续跑。关闭后这台电脑不再提供待办接口，其他设备会自动改用原生会话列表。',
+        checked: features.todo,
+        disabled: !features.loaded || features.busy,
+        onToggle: () => { void saveTodoFeature(!features.todo); },
+        hint: features.error || '',
+      });
+    }
+
+    function FullAccessFeatureGroup() {
+      const features = useFeatures();
+      return h(FeatureSwitchGroup, {
+        id: 'full-access',
+        heading: '默认权限模式',
+        title: '新开对话默认完全权限',
+        description: '开启后，本地和远程 DSH 新开对话时均默认使用「完全权限」模式（绕过命令执行与文件读写二次确认，免除手动切换与频繁审批）。关闭后恢复默认权限模式。',
+        checked: features.fullAccessByDefault,
+        disabled: !features.loaded || features.busy,
+        onToggle: () => { void saveFullAccessFeature(!features.fullAccessByDefault); },
+        hint: features.error || (features.fullAccessByDefault ? '已开启：本地与远程新建对话将默认采用完全权限模式。' : '已关闭：新建对话使用工作区内修改模式。'),
+      });
+    }
+
+    function GoalCreationFeatureGroup() {
+      const features = useFeatures();
+      return h(FeatureSwitchGroup, {
+        id: 'goal-creation',
+        heading: '目标创建限制',
+        title: '禁止 AI 新建目标',
+        description: '开启后，禁止 AI 在这台电脑上新建 DSH 目标；不影响已有目标及其恢复/续跑，普通任务照常执行。',
+        checked: features.blockGoalCreation,
+        disabled: !features.loaded || features.busy,
+        onToggle: () => { void saveGoalCreationFeature(!features.blockGoalCreation); },
+        hint: features.error || features.goalCreationError || '设置保存在这台电脑，对后续工具执行立即生效。',
+      });
+    }
+
+    function LockRemoteFeatureGroup() {
+      const features = useFeatures();
+      return h(FeatureSwitchGroup, {
+        id: 'lock-remotes',
+        heading: '锁屏断开远程',
+        title: '锁屏时断开远程 DSH',
+        description: '开启后，这台电脑锁屏时断开已经打开的远程 DSH，锁屏期间不重连。解锁后自动重连，并恢复这些页面和预加载。',
+        checked: features.disconnectRemotesOnLock === true,
+        disabled: !features.loaded || features.busy,
+        onToggle: () => { void saveLockRemoteFeature(!features.disconnectRemotesOnLock); },
+        hint: features.error || '只保存在这台电脑，不会同步到其他电脑。关闭时仍只暂停远程同步。',
+      });
+    }
+
+    function MobileFeatureGroup() {
+      const [enabled, setEnabled] = useState(readMobileFeatureEnabled);
+      const [changed, setChanged] = useState(false);
+      return h(FeatureSwitchGroup, {
+        id: 'mobile',
+        heading: 'DSH 移动端优化',
+        title: '启用移动端抽屉',
+        description: '适配移动端 DSH，界面更简洁，内容展示更充分。',
+        checked: enabled,
+        disabled: false,
+        onToggle: () => {
+          const next = !enabled;
+          writeMobileFeatureEnabled(next);
+          setEnabled(next);
+          setChanged(true);
+          void callApi('saveFeatures', { clientPreferences: { mobileEnabled: Boolean(next) } }).catch(() => {});
+        },
+        hint: changed ? '已保存，刷新页面后生效。' : '设置保存在这台电脑（支持随 dsh-au 云插件跨电脑同步），刷新页面后生效。',
+      });
+    }
+
+    function normalizeRuleForDraft(r) {
+      const statusCodes = Array.isArray(r.statusCodes) ? r.statusCodes : [];
+      const keywords = Array.isArray(r.keywords) ? r.keywords : [];
+      return {
+        id: r.id || `rule-${Math.random().toString(36).slice(2, 9)}`,
+        name: typeof r.name === 'string' ? r.name : '未命名规则',
+        enabled: r.enabled !== false,
+        statusCodes,
+        statusCodesStr: statusCodes.join(', '),
+        keywords,
+        keywordsStr: keywords.join(', '),
+        action: r.action === 'compact_retry' || r.action === 'followup_prompt' ? r.action : 'wait_retry',
+        delaySec: typeof r.delaySec === 'number' ? r.delaySec : (r.action === 'compact_retry' ? 0 : 60),
+        maxRetries: typeof r.maxRetries === 'number' ? r.maxRetries : 5,
+        compactOnSecondAttempt: Boolean(r.compactOnSecondAttempt),
+      };
+    }
+
+    /** 自动续跑与智能恢复独立参数配置弹窗（结构化规则卡片编辑器） */
+    function AutoContinueModal({ isOpen, onClose, autoContinue, busy, error, onSave }) {
+      const [draftRules, setDraftRules] = useState(() => {
+        const source = Array.isArray(autoContinue?.rules) ? autoContinue.rules : [];
+        return source.map(normalizeRuleForDraft);
+      });
+      const [continueOnTruncate, setContinueOnTruncate] = useState(() => autoContinue?.continueOnTruncate ?? true);
+      const [prompt, setPrompt] = useState(() => autoContinue?.prompt ?? '继续');
+      const [localError, setLocalError] = useState('');
+
+      useEffect(() => {
+        if (!isOpen) return;
+        const source = Array.isArray(autoContinue?.rules) ? autoContinue.rules : [];
+        setDraftRules(source.map(normalizeRuleForDraft));
+        setContinueOnTruncate(autoContinue?.continueOnTruncate ?? true);
+        setPrompt(autoContinue?.prompt ?? '继续');
+        setLocalError('');
+      }, [isOpen, autoContinue]);
+
+      useEffect(() => {
+        if (!isOpen) return undefined;
+        const onKeyDown = (e) => {
+          if (e.key === 'Escape' && !busy) {
+            e.preventDefault();
+            onClose();
+          }
+        };
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+      }, [isOpen, busy, onClose]);
+
+      if (!isOpen) return null;
+
+      const updateRule = (idx, patch) => {
+        setDraftRules((prev) => {
+          const next = [...prev];
+          next[idx] = { ...next[idx], ...patch };
+          return next;
+        });
+      };
+
+      const deleteRule = (idx) => {
+        if (draftRules.length <= 1) {
+          setLocalError('至少保留一条恢复规则');
+          return;
+        }
+        setLocalError('');
+        setDraftRules((prev) => prev.filter((_, i) => i !== idx));
+      };
+
+      const addRule = () => {
+        setLocalError('');
+        const newRule = normalizeRuleForDraft({
+          id: `rule-${Date.now()}`,
+          name: '自定义错误规则',
+          enabled: true,
+          statusCodes: [],
+          keywords: [],
+          action: 'wait_retry',
+          delaySec: 30,
+          maxRetries: 3,
+          compactOnSecondAttempt: true,
+        });
+        setDraftRules((prev) => [...prev, newRule]);
+      };
+
+      const resetRules = () => {
+        setLocalError('');
+        setDraftRules([]);
+      };
+
+      const handleSave = async () => {
+        const cleanedRules = [];
+        for (let i = 0; i < draftRules.length; i++) {
+          const r = draftRules[i];
+          const name = (r.name || '').trim();
+          if (!name) {
+            setLocalError(`第 ${i + 1} 条规则名称不能为空`);
+            return;
+          }
+
+          const delay = Number(r.delaySec);
+          if (isNaN(delay) || delay < 0 || delay > 600) {
+            setLocalError(`规则「${name}」等待秒数须在 0 ~ 600 秒之间`);
+            return;
+          }
+
+          const retries = Number(r.maxRetries);
+          if (isNaN(retries) || retries < 1 || retries > 30) {
+            setLocalError(`规则「${name}」最大重试次数须在 1 ~ 30 次之间`);
+            return;
+          }
+
+          const statusCodes = (r.statusCodesStr || '')
+            .split(',')
+            .map((s) => parseInt(s.trim(), 10))
+            .filter((n) => !isNaN(n));
+
+          const keywords = (r.keywordsStr || '')
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean);
+
+          cleanedRules.push({
+            id: r.id,
+            name,
+            enabled: Boolean(r.enabled),
+            statusCodes,
+            keywords,
+            action: r.action,
+            delaySec: delay,
+            maxRetries: retries,
+            compactOnSecondAttempt: Boolean(r.compactOnSecondAttempt),
+          });
+        }
+
+        setLocalError('');
+        const firstWait = cleanedRules.find((r) => r.action === 'wait_retry') || cleanedRules[0] || {};
+        const payload = {
+          rules: cleanedRules,
+          retryDelaySec: typeof firstWait.delaySec === 'number' ? firstWait.delaySec : 60,
+          maxRetries: typeof firstWait.maxRetries === 'number' ? firstWait.maxRetries : 5,
+          compactOnDisconnect: Boolean(firstWait.compactOnSecondAttempt),
+          continueOnTruncate: Boolean(continueOnTruncate),
+          prompt: typeof prompt === 'string' && prompt.trim() ? prompt.trim() : '继续',
+        };
+
+        const ok = await onSave(payload);
+        if (ok) {
+          onClose();
+        }
+      };
+
+      return h(
+        'div',
+        {
+          className: 'dsh-au-modal-mask',
+          onClick: (e) => { if (e.target === e.currentTarget && !busy) onClose(); },
+        },
+        h(
+          'div',
+          { className: 'dsh-au-cloud-sync-modal dsh-au-auto-continue-modal', role: 'dialog', 'aria-modal': 'true' },
+          h(
+            'div',
+            { className: 'dsh-au-cloud-sync-modal-header' },
+            h(
+              'div',
+              null,
+              h('h3', null, '自动续跑与智能恢复配置'),
+              h('p', null, '明确配置每个错误码与关键错误信息对应的恢复动作，支持随时新增自定义错误类型')
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dsh-au-cloud-sync-modal-close',
+                onClick: onClose,
+                disabled: busy,
+                title: '关闭弹窗',
+              },
+              '×'
+            )
+          ),
+          h(
+            'div',
+            { className: 'dsh-au-auto-continue-modal-body' },
+            // 主体规则卡片列表
+            h(
+              'div',
+              { className: 'dsh-au-ac-rules-container' },
+              draftRules.map((rule, idx) => {
+                const parsedCodes = (rule.statusCodesStr || '')
+                  .split(',')
+                  .map((s) => s.trim())
+                  .filter(Boolean);
+                const codeBadgeText = parsedCodes.length > 0 ? `HTTP ${parsedCodes.join(', ')}` : '通用错误';
+                const is4xx = parsedCodes.some((c) => c.startsWith('4'));
+
+                let actionBadgeText = `等待 ${rule.delaySec || 0}s 后原地重试`;
+                if (rule.action === 'compact_retry') {
+                  actionBadgeText = '先压缩上下文后继续';
+                } else if (rule.action === 'followup_prompt') {
+                  actionBadgeText = `等待 ${rule.delaySec || 0}s 后发送提示词`;
+                }
+
+                return h(
+                  'div',
+                  { key: rule.id || idx, className: 'dsh-au-ac-rule-card' },
+                  // 卡片头部
+                  h(
+                    'div',
+                    { className: 'dsh-au-ac-rule-header' },
+                    h(
+                      'div',
+                      { className: 'dsh-au-ac-rule-header-left' },
+                      h('input', {
+                        type: 'checkbox',
+                        className: 'dsh-au-auto-continue-checkbox',
+                        checked: Boolean(rule.enabled),
+                        disabled: busy,
+                        title: '启用/停用此规则',
+                        onChange: (e) => updateRule(idx, { enabled: e.target.checked }),
+                      }),
+                      h('input', {
+                        type: 'text',
+                        className: 'dsh-au-ac-rule-name-input',
+                        value: rule.name,
+                        disabled: busy,
+                        placeholder: '规则名称',
+                        onChange: (e) => updateRule(idx, { name: e.target.value }),
+                      })
+                    ),
+                    h(
+                      'div',
+                      { className: 'dsh-au-ac-rule-header-right' },
+                      h('span', { className: `dsh-au-ac-rule-badge dsh-au-ac-badge-code${is4xx ? ' code-4xx' : ''}` }, codeBadgeText),
+                      h('span', { className: 'dsh-au-ac-rule-badge dsh-au-ac-badge-action' }, actionBadgeText),
+                      h(
+                        'button',
+                        {
+                          type: 'button',
+                          className: 'dsh-au-auto-continue-btn danger',
+                          disabled: busy || draftRules.length <= 1,
+                          title: draftRules.length <= 1 ? '至少保留一条规则' : '删除此规则',
+                          onClick: () => deleteRule(idx),
+                        },
+                        '删除'
+                      )
+                    )
+                  ),
+                  // 卡片字段网格
+                  h(
+                    'div',
+                    { className: 'dsh-au-ac-rule-grid' },
+                    // 1. 错误码（HTTP Status）
+                    h(
+                      'div',
+                      { className: 'dsh-au-ac-rule-field' },
+                      h('label', { className: 'dsh-au-ac-rule-field-label' }, '错误码 (HTTP Status)'),
+                      h('input', {
+                        type: 'text',
+                        className: 'dsh-au-auto-continue-text-input',
+                        value: rule.statusCodesStr,
+                        disabled: busy,
+                        placeholder: '例如: 503 或 413 (逗号分隔)',
+                        onChange: (e) => updateRule(idx, { statusCodesStr: e.target.value }),
+                      })
+                    ),
+                    // 2. 关键错误信息（匹配子串，逗号分隔）
+                    h(
+                      'div',
+                      { className: 'dsh-au-ac-rule-field' },
+                      h('label', { className: 'dsh-au-ac-rule-field-label' }, '关键错误信息 (匹配子串，逗号分隔)'),
+                      h('input', {
+                        type: 'text',
+                        className: 'dsh-au-auto-continue-text-input',
+                        value: rule.keywordsStr,
+                        disabled: busy,
+                        placeholder: '例如: auth_unavailable, no auth available',
+                        onChange: (e) => updateRule(idx, { keywordsStr: e.target.value }),
+                      })
+                    ),
+                    // 3. 处理方式
+                    h(
+                      'div',
+                      { className: 'dsh-au-ac-rule-field full-width' },
+                      h('label', { className: 'dsh-au-ac-rule-field-label' }, '处理方式'),
+                      h(
+                        'select',
+                        {
+                          className: 'dsh-au-ac-select',
+                          value: rule.action,
+                          disabled: busy,
+                          onChange: (e) => {
+                            const newAction = e.target.value;
+                            const patch = { action: newAction };
+                            if (newAction === 'compact_retry' && rule.delaySec === 60) {
+                              patch.delaySec = 0;
+                            }
+                            updateRule(idx, patch);
+                          },
+                        },
+                        h('option', { value: 'wait_retry' }, '等待设定秒数后原地继续（不发消息）'),
+                        h('option', { value: 'compact_retry' }, '先压缩上下文后立即原地继续'),
+                        h('option', { value: 'followup_prompt' }, '等待后自动发送续写提示词')
+                      )
+                    ),
+                    // 4. 参数行
+                    h(
+                      'div',
+                      { className: 'dsh-au-ac-rule-field full-width' },
+                      h(
+                        'div',
+                        { className: 'dsh-au-ac-rule-params-row' },
+                        h(
+                          'span',
+                          { className: 'dsh-au-auto-continue-input-wrap' },
+                          h('span', { className: 'dsh-au-ac-rule-field-label' }, '等待秒数:'),
+                          h('input', {
+                            type: 'number',
+                            min: 0,
+                            max: 600,
+                            className: 'dsh-au-auto-continue-number-input',
+                            value: rule.delaySec,
+                            disabled: busy,
+                            onChange: (e) => updateRule(idx, { delaySec: e.target.value }),
+                          }),
+                          h('span', { className: 'dsh-au-auto-continue-unit' }, '秒')
+                        ),
+                        h(
+                          'span',
+                          { className: 'dsh-au-auto-continue-input-wrap' },
+                          h('span', { className: 'dsh-au-ac-rule-field-label' }, '最大重试:'),
+                          h('input', {
+                            type: 'number',
+                            min: 1,
+                            max: 30,
+                            className: 'dsh-au-auto-continue-number-input',
+                            value: rule.maxRetries,
+                            disabled: busy,
+                            onChange: (e) => updateRule(idx, { maxRetries: e.target.value }),
+                          }),
+                          h('span', { className: 'dsh-au-auto-continue-unit' }, '次')
+                        ),
+                        rule.action === 'wait_retry'
+                          ? h(
+                              'label',
+                              { className: 'dsh-au-auto-continue-checkbox-label' },
+                              h('input', {
+                                type: 'checkbox',
+                                className: 'dsh-au-auto-continue-checkbox',
+                                checked: Boolean(rule.compactOnSecondAttempt),
+                                disabled: busy,
+                                onChange: (e) => updateRule(idx, { compactOnSecondAttempt: e.target.checked }),
+                              }),
+                              '连续第 2 次断连时先压缩上下文'
+                            )
+                          : null
+                      )
+                    )
+                  )
+                );
+              })
+            ),
+            // 规则列表下方工具栏
+            h(
+              'div',
+              { className: 'dsh-au-ac-rule-toolbar' },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dsh-au-auto-continue-btn secondary',
+                  disabled: busy,
+                  onClick: addRule,
+                },
+                '+ 新增错误规则'
+              ),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dsh-au-auto-continue-btn secondary',
+                  disabled: busy,
+                  onClick: resetRules,
+                },
+                '清空规则'
+              )
+            ),
+            // 弹窗底部补充区（非报错类的字数截断续写）
+            h(
+              'div',
+              { className: 'dsh-au-ac-truncate-card' },
+              h(
+                'label',
+                { className: 'dsh-au-auto-continue-checkbox-label' },
+                h('input', {
+                  type: 'checkbox',
+                  className: 'dsh-au-auto-continue-checkbox',
+                  checked: Boolean(continueOnTruncate),
+                  disabled: busy,
+                  onChange: (e) => setContinueOnTruncate(e.target.checked),
+                }),
+                '输出字数截断 (max-tokens) 自动发送提示词续写'
+              ),
+              h(
+                'span',
+                { className: 'dsh-au-auto-continue-input-wrap' },
+                h('span', { className: 'dsh-au-ac-rule-field-label' }, '续写提示词:'),
+                h('input', {
+                  type: 'text',
+                  style: { width: '120px' },
+                  className: 'dsh-au-auto-continue-text-input',
+                  value: prompt,
+                  disabled: busy || !continueOnTruncate,
+                  placeholder: '继续',
+                  onChange: (e) => setPrompt(e.target.value),
+                })
+              )
+            )
+          ),
+          h(
+            'div',
+            { className: 'dsh-au-cloud-sync-modal-footer' },
+            h(
+              'div',
+              { className: 'dsh-au-cloud-sync-modal-footer-left' },
+              (localError || error)
+                ? h('span', { style: { color: '#ef4444', fontSize: '12px' } }, localError || error)
+                : null
+            ),
+            h(
+              'div',
+              { className: 'dsh-au-cloud-sync-modal-footer-right' },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dsh-au-auto-continue-btn secondary',
+                  disabled: busy,
+                  onClick: onClose,
+                },
+                '取消'
+              ),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dsh-au-auto-continue-btn',
+                  disabled: busy,
+                  onClick: handleSave,
+                },
+                busy ? '正在保存...' : '保存配置'
+              )
+            )
+          )
+        )
+      );
+    }
+
+    /** 自动续跑与智能恢复功能设置面板（主开关 + 参数摘要条 + 独立配置弹窗） */
+    function AutoContinueFeatureGroup() {
+      const features = useFeatures();
+      const ac = features.autoContinue || {};
+      const disabled = !features.loaded || features.busy;
+      const [isModalOpen, setIsModalOpen] = useState(false);
+
+      const rules = Array.isArray(ac.rules) ? ac.rules : [];
+      const enabledRules = rules.filter((r) => r.enabled !== false);
+      const summaryText = enabledRules.length > 0
+        ? `已启用 ${enabledRules.length} 条错误规则`
+        : '未启用任何错误规则';
+
+      const hintMsg = features.autoContinueSaved
+        ? '已保存，立即生效。'
+        : '';
+
+      return h(
+        'section',
+        { className: 'dsh-au-settings-group', 'aria-labelledby': 'dsh-au-feature-auto-continue-title' },
+        h('h3', { id: 'dsh-au-feature-auto-continue-title' }, '自动续跑与智能恢复'),
+        h(SettingsItem, {
+          title: '启用智能恢复与自动续跑',
+          description: '遇到 503 服务繁忙或远端断连时在后台安静等待后原地重试（不刷屏发消息）；连续断连可自动压缩瘦身，字数截断时自动接力续写。',
+          hint: [ac.enabled ? summaryText : '', features.error || hintMsg],
+          control: h(
+            'button',
+            {
+              type: 'button',
+              role: 'switch',
+              className: 'dsh-au-switch',
+              'aria-checked': Boolean(ac.enabled),
+              'aria-labelledby': 'dsh-au-feature-auto-continue-title',
+              disabled,
+              onClick: () => { void saveAutoContinueFeature({ enabled: !ac.enabled }); },
+            },
+            h('span', { className: 'dsh-au-switch-knob', 'aria-hidden': 'true' })
+          ),
+          actions: ac.enabled
+            ? h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dsh-au-btn',
+                  disabled,
+                  onClick: () => setIsModalOpen(true),
+                },
+                '配置规则'
+              )
+            : null,
+        }),
+        // 独立弹窗
+        h(AutoContinueModal, {
+          isOpen: isModalOpen,
+          onClose: () => setIsModalOpen(false),
+          autoContinue: ac,
+          busy: features.busy,
+          error: features.error,
+          onSave: (draft) => saveAutoContinueFeature(draft),
+        })
+      );
+    }
+
+    /** 云端配置自动同步兜底项列表（与服务端 OFFICIAL_SYNC_ITEMS 5 大分类一致） */
+    const FALLBACK_CLOUD_SYNC_ITEMS = [
+      {
+        id: 'general-settings',
+        category: '通用设置',
+        title: '外观字号、对话界面与用量显示',
+        defaultDiff: '字号 18/15/17 · 标准视图 · 详细性能统计 · 链接新标签页打开 · 紧凑用量 · 关闭日志上报',
+        comparisons: [
+          { label: '正文 / 代码 / 终端字号', defaultValue: '14 / 13 / 14 px', currentValue: '18 / 15 / 17 px' },
+          { label: '对话消息视图 (transcriptView)', defaultValue: '默认视图', currentValue: '标准视图 (standard)' },
+          { label: '性能与耗时统计 (performanceUsage)', defaultValue: '简略', currentValue: '详细统计 (detailed)' },
+          { label: '对话内链接打开方式 (linkOpening)', defaultValue: '当前窗口', currentValue: '新标签页打开 (new-tab)' },
+          { label: '账户用量显示样式 (usage)', defaultValue: '标准卡片', currentValue: '紧凑模式 (compact)' },
+          { label: '新手引导与官方会话日志上报', defaultValue: '开启引导 · 开启上报', currentValue: '跳过引导 · 关闭日志上报' },
+        ],
+      },
+      {
+        id: 'subagent-models',
+        category: '内置插件',
+        title: '子代理模型白名单',
+        defaultDiff: '从私人仓库同步子代理可用模型白名单',
+        comparisons: [
+          { label: '允许子代理独立选择模型', defaultValue: '关闭 (false)', currentValue: '开启 (true)' },
+          { label: '子代理可用模型白名单', defaultValue: '未限制（仅跟随主对话）', currentValue: '按私人仓库子代理白名单同步' },
+        ],
+      },
+      {
+        id: 'permission-preset',
+        category: 'Agent 预设',
+        title: '默认完全权限模式',
+        defaultDiff: '新开对话默认 danger-full-access（免除读写与命令二次确认）',
+        comparisons: [
+          { label: '新建对话默认权限预设 (defaultPreset)', defaultValue: '工作区内修改 (workspace-write，需审批)', currentValue: '完全权限 (danger-full-access，免确认)' },
+        ],
+      },
+      {
+        id: 'llm-providers',
+        category: '模型',
+        title: 'DSH 与 Codex 模型供应商、目录及默认模型',
+        defaultDiff: '从私人仓库同步模型供应商、目录与新对话默认模型',
+        comparisons: [
+          { label: 'DSH 模型供应商列表 (llm-pi-ai)', defaultValue: '无自定义供应商', currentValue: '按所选方案从私人仓库同步供应商列表' },
+          { label: 'Codex 模型目录', defaultValue: '不自动刷新', currentValue: '同步完整与精简目录，不切换当前模型' },
+          { label: '原生 ACP 代理适配器', defaultValue: '未配置', currentValue: '按所选方案同步 ACP 适配器' },
+          { label: '新对话默认模型 (agent-default-model)', defaultValue: '官方默认模型', currentValue: '按所选模型方案同步默认模型与思考强度' },
+        ],
+      },
+      {
+        id: 'desktop-preferences',
+        category: '桌面设置',
+        title: '桌面托盘、局域网与通知偏好',
+        defaultDiff: '关闭最小化到托盘 · 允许局域网与浏览器访问 · 仅通知回合与定时任务结果',
+        comparisons: [
+          { label: '点击窗口关闭按钮 (closeToTray)', defaultValue: '直接退出应用 (false)', currentValue: '最小化到系统托盘 (true)' },
+          { label: '网络暴露与浏览器访问', defaultValue: '仅本机访问 (local)', currentValue: '局域网访问 (lan) + 允许浏览器访问' },
+          { label: '系统桌面通知范围', defaultValue: '全部通知默认状态', currentValue: '开启对话回合与定时任务完成/失败通知，关闭后台作业通知' },
+        ],
+      },
+    ];
+
+    /** 云插件与配置兜底列表（与服务端 buildCloudPluginSyncItems 一致） */
+    const FALLBACK_CLOUD_SYNC_PLUGINS = [];
+
+    /** 本机设置兜底列表（与服务端 PREFERENCE_SYNC_ITEMS 一致） */
+    const FALLBACK_PREFERENCE_ITEMS = [
+      {
+        id: 'shortcuts',
+        category: '本机设置',
+        title: '设备 / 页面切换快捷键',
+        defaultDiff: '按电脑各存一份：推送写本机备份，拉取只读本机备份',
+      },
+      {
+        id: 'modelShortcuts',
+        category: '本机设置',
+        title: '模型快捷槽位',
+        defaultDiff: '按电脑各存一份：推送写本机备份，拉取只读本机备份',
+      },
+    ];
+
+    const CLOUD_SYNC_PROFILE_OPTIONS = [
+      { id: 'kiro', label: 'kiro' },
+      { id: 'generic', label: 'generic' },
+      ...(typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || '')
+        ? [{ id: 'local', label: 'local' }]
+        : []),
+    ];
+
+    const PREFERENCE_JUMPS = {
+      shortcuts: { anchor: 'shortcuts', label: '前往设置', title: '打开快捷键设置' },
+      modelShortcuts: { anchor: 'modelShortcuts', label: '前往设置', title: '打开模型快捷设置' },
+    };
+
+    /** 配置弹窗挂到设置页上，避免被折叠的大类挡住，也能盖住同步弹窗。 */
+    function portalSettingsModal(node) {
+      const target = typeof document !== 'undefined' ? document.querySelector('.dsh-au-settings-page') : null;
+      if (target && typeof ReactDOM.createPortal === 'function') return ReactDOM.createPortal(node, target);
+      return node;
+    }
+
+    function resolveItemComparisons(item, profile) {
+      if (item.id === 'llm-providers') {
+        if (profile === 'generic') {
+          return [
+            { label: 'DSH 模型供应商列表 (llm-pi-ai)', defaultValue: '无自定义供应商', currentValue: '按 generic 方案从私人仓库同步供应商列表' },
+            { label: 'Codex 模型目录', defaultValue: '不自动刷新', currentValue: '同步完整与精简目录，不切换当前模型' },
+            { label: '原生 ACP 代理适配器', defaultValue: '未配置', currentValue: '不启用（纯网关模式）' },
+            { label: '新对话默认模型', defaultValue: '官方默认模型', currentValue: '保持通用网关默认模型' },
+          ];
+        }
+        if (profile === 'local') {
+          return [
+            { label: 'DSH 模型供应商列表 (llm-pi-ai)', defaultValue: '无自定义供应商', currentValue: '按 local 方案从私人仓库同步供应商列表' },
+            { label: 'Codex 模型目录', defaultValue: '不自动刷新', currentValue: '同步完整与精简目录，不切换当前模型' },
+            { label: '新对话默认模型 (agent-default-model)', defaultValue: '官方默认模型', currentValue: '按 local 方案同步默认模型与思考强度' },
+          ];
+        }
+        return [
+          { label: 'DSH 模型供应商列表 (llm-pi-ai)', defaultValue: '无自定义供应商', currentValue: '按所选方案从私人仓库同步供应商列表' },
+          { label: 'Codex 模型目录', defaultValue: '不自动刷新', currentValue: '同步完整与精简目录，不切换当前模型' },
+          { label: '原生 ACP 代理适配器', defaultValue: '未配置', currentValue: '按所选方案同步 ACP 适配器' },
+          { label: '新对话默认模型 (agent-default-model)', defaultValue: '官方默认模型', currentValue: '按所选方案同步默认模型与思考强度' },
+        ];
+      }
+      if (Array.isArray(item.comparisons) && item.comparisons.length > 0) return item.comparisons;
+      const fallback = FALLBACK_CLOUD_SYNC_ITEMS.find(f => f.id === item.id)
+        || FALLBACK_CLOUD_SYNC_PLUGINS.find(f => f.id === item.id);
+      return fallback?.comparisons || [];
+    }
+
+    /** 按键排序序列化，用于前端即时对比本机与云端 JSON 配置是否一致。 */
+    function canonicalCloudSyncJson(value) {
+      if (Array.isArray(value)) return `[${value.map(item => canonicalCloudSyncJson(item)).join(',')}]`;
+      if (value && typeof value === 'object') {
+        const keys = Object.keys(value).sort();
+        return `{${keys.map(key => `${JSON.stringify(key)}:${canonicalCloudSyncJson(value[key])}`).join(',')}}`;
+      }
+      return JSON.stringify(value);
+    }
+
+    /** 结合当前浏览器实时快捷键与模型槽位状态，重算「本机设置」的本地/云端一致状态。 */
+    function resolvePreferenceSyncItems(preferenceItems, shortcutOverrides, modelShortcutSnapshot) {
+      const baseList = Array.isArray(preferenceItems) && preferenceItems.length > 0
+        ? preferenceItems
+        : FALLBACK_PREFERENCE_ITEMS;
+      return baseList.map((item) => {
+        if (item.id === 'shortcuts' && item.cloudValue !== undefined && shortcutOverrides && typeof shortcutOverrides === 'object') {
+          const hasBackup = item.cloudValue !== null;
+          const inSync = hasBackup
+            ? canonicalCloudSyncJson(shortcutOverrides) === canonicalCloudSyncJson(item.cloudValue)
+            : Object.keys(shortcutOverrides).length === 0;
+          return {
+            ...item,
+            inSync,
+            diffLabel: inSync ? '✓ 与云一致' : (hasBackup ? '本地与云备份不一致' : '本机有修改 / 云端暂无备份'),
+          };
+        }
+        if (item.id === 'modelShortcuts' && item.cloudValue !== undefined && modelShortcutSnapshot?.loaded) {
+          const liveModelShortcuts = {
+            enabled: Boolean(modelShortcutSnapshot.enabled),
+            binding: modelShortcutSnapshot.binding ?? null,
+            slots: Array.isArray(modelShortcutSnapshot.slots) ? modelShortcutSnapshot.slots : [],
+          };
+          const hasBackup = item.cloudValue !== null;
+          const inSync = hasBackup
+            ? canonicalCloudSyncJson(liveModelShortcuts) === canonicalCloudSyncJson(item.cloudValue)
+            : false;
+          return {
+            ...item,
+            inSync,
+            diffLabel: inSync ? '✓ 与云一致' : (hasBackup ? '本地与云备份不一致' : '云端暂无本机备份'),
+          };
+        }
+        return item;
+      });
+    }
+
+    /** 云端同步独立弹窗：双 Tab（DSH 官方设置 | 云插件与配置）、勾选启用状态与配置、展开对比 */
+    function CloudSyncModal({ isOpen, onClose, cloudSync, items, itemsByProfile, pluginItems, preferenceItems, machineId, onSave, onSaveAndSync, onPushToRepo, onSyncSinglePlugin, busy, message }) {
+      const [activeTab, setActiveTab] = useState('official');
+      const [profile, setProfile] = useState(cloudSync.profile || 'generic');
+      const [preferenceMap, setPreferenceMap] = useState(() => {
+        const initial = {};
+        for (const id of (cloudSync.selectedPreferences || FALLBACK_PREFERENCE_ITEMS.map(i => i.id))) initial[id] = true;
+        return initial;
+      });
+      const [selectedMap, setSelectedMap] = useState(() => {
+        const initial = {};
+        for (const id of (cloudSync.selectedItems || [])) initial[id] = true;
+        return initial;
+      });
+      const [selectedPluginsMap, setSelectedPluginsMap] = useState(() => {
+        const initial = {};
+        for (const id of (cloudSync.selectedPlugins || FALLBACK_CLOUD_SYNC_PLUGINS.map(p => p.id))) initial[id] = true;
+        return initial;
+      });
+      const [syncConfigMap, setSyncConfigMap] = useState(() => {
+        const initial = {};
+        for (const id of (cloudSync.syncPluginConfigs || FALLBACK_CLOUD_SYNC_PLUGINS.map(p => p.id))) initial[id] = true;
+        return initial;
+      });
+      const [expandedMap, setExpandedMap] = useState({});
+
+      useEffect(() => {
+        if (!isOpen) return;
+        setProfile(cloudSync.profile || 'generic');
+        const nextItems = {};
+        for (const id of (cloudSync.selectedItems || [])) nextItems[id] = true;
+        setSelectedMap(nextItems);
+        const nextPlugins = {};
+        for (const id of (cloudSync.selectedPlugins || FALLBACK_CLOUD_SYNC_PLUGINS.map(p => p.id))) nextPlugins[id] = true;
+        setSelectedPluginsMap(nextPlugins);
+        const nextConfigs = {};
+        for (const id of (cloudSync.syncPluginConfigs || FALLBACK_CLOUD_SYNC_PLUGINS.map(p => p.id))) nextConfigs[id] = true;
+        setSyncConfigMap(nextConfigs);
+        const nextPreferences = {};
+        for (const id of (cloudSync.selectedPreferences || FALLBACK_PREFERENCE_ITEMS.map(i => i.id))) nextPreferences[id] = true;
+        setPreferenceMap(nextPreferences);
+      }, [isOpen, cloudSync.profile, cloudSync.selectedItems, cloudSync.selectedPlugins, cloudSync.syncPluginConfigs, cloudSync.selectedPreferences]);
+
+      useEffect(() => {
+        if (!isOpen) return;
+        setExpandedMap({});
+      }, [isOpen]);
+
+      useEffect(() => {
+        if (!isOpen) return undefined;
+        const onKeyDown = (e) => {
+          if (e.key === 'Escape' && !busy) {
+            if (typeof document !== 'undefined' && document.querySelector('.dsh-au-modal-mask-above')) return;
+            e.preventDefault();
+            onClose();
+          }
+        };
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+      }, [isOpen, busy, onClose]);
+
+      if (!isOpen) return null;
+
+      const profileItems = itemsByProfile && Array.isArray(itemsByProfile[profile]) && itemsByProfile[profile].length > 0
+        ? itemsByProfile[profile]
+        : null;
+      const allList = profileItems || (items && items.length > 0 ? items : FALLBACK_CLOUD_SYNC_ITEMS);
+      const allPluginList = Array.isArray(pluginItems) ? pluginItems : FALLBACK_CLOUD_SYNC_PLUGINS;
+      const isPluginTab = activeTab === 'plugins';
+      const activeList = isPluginTab ? allPluginList : allList;
+      const allExpanded = activeList.every(item => Boolean(expandedMap[item.id]));
+
+      const handleToggle = (id) => {
+        if (isPluginTab) {
+          setSelectedPluginsMap(prev => ({ ...prev, [id]: !prev[id] }));
+        } else {
+          setSelectedMap(prev => ({ ...prev, [id]: !prev[id] }));
+        }
+      };
+
+      const handleTogglePluginConfig = (id) => {
+        setSyncConfigMap(prev => ({ ...prev, [id]: !prev[id] }));
+      };
+
+      const handleToggleExpand = (id) => {
+        setExpandedMap(prev => ({ ...prev, [id]: !prev[id] }));
+      };
+
+      const handleToggleExpandAll = () => {
+        const next = { ...expandedMap };
+        for (const item of activeList) {
+          if (allExpanded) delete next[item.id];
+          else next[item.id] = true;
+        }
+        setExpandedMap(next);
+      };
+
+      const handleSelectAll = () => {
+        if (isPluginTab) {
+          const next = {};
+          for (const item of allPluginList) next[item.id] = true;
+          setSelectedPluginsMap(next);
+        } else {
+          const next = {};
+          for (const item of allList) next[item.id] = true;
+          setSelectedMap(next);
+        }
+      };
+
+      const handleDeselectAll = () => {
+        if (isPluginTab) {
+          setSelectedPluginsMap({});
+        } else {
+          setSelectedMap({});
+        }
+      };
+
+      const currentSelectedItems = allList.filter(item => selectedMap[item.id]).map(item => item.id);
+      const currentSelectedPlugins = allPluginList.filter(item => selectedPluginsMap[item.id]).map(item => item.id);
+      const preferenceList = preferenceItems && preferenceItems.length > 0 ? preferenceItems : FALLBACK_PREFERENCE_ITEMS;
+      const currentSelectedPreferences = preferenceList.filter(item => preferenceMap[item.id]).map(item => item.id);
+      const prefDiffItems = preferenceList.filter(item => item.inSync === false);
+      const officialDiffItems = allList.filter(item => item.inSync === false);
+      const pluginDiffItems = allPluginList.filter(item => item.inSync === false);
+      const officialTabDiffCount = prefDiffItems.length + officialDiffItems.length;
+      const pluginTabDiffCount = pluginDiffItems.length;
+      const totalDiffItems = [...prefDiffItems, ...officialDiffItems, ...pluginDiffItems];
+      const totalDiffCount = totalDiffItems.length;
+      const diffTitleSummary = totalDiffItems.slice(0, 3).map(item => item.title).join('、')
+        + (totalDiffCount > 3 ? ` 等 ${totalDiffCount} 项` : '');
+      const togglePreference = (id) => setPreferenceMap(prev => ({ ...prev, [id]: !prev[id] }));
+      const buildPayload = () => ({
+        profile,
+        selectedItems: currentSelectedItems,
+        selectedPlugins: currentSelectedPlugins,
+        syncPluginConfigs: currentSelectedPlugins,
+        selectedPreferences: currentSelectedPreferences,
+      });
+
+      return h(
+        'div',
+        {
+          className: 'dsh-au-modal-mask',
+          onClick: (e) => { if (e.target === e.currentTarget && !busy) onClose(); },
+        },
+        h(
+          'div',
+          { className: 'dsh-au-cloud-sync-modal', role: 'dialog', 'aria-modal': 'true' },
+          h(
+            'div',
+            { className: 'dsh-au-cloud-sync-modal-header' },
+            h(
+              'div',
+              null,
+              h('h3', null, '自定义云端同步设置项'),
+              h('p', null, isPluginTab
+                ? '勾选需要实时同步的云插件（勾选后自动同步该插件的安装、启用状态与插件配置）。'
+                : `当前设备：${machineId || '未识别'} · 以下仅列出与 DSH 官方默认设置不同的配置项，点击任意卡片可展开查看默认与当前对比。`)
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dsh-au-cloud-sync-modal-close',
+                onClick: onClose,
+                disabled: busy,
+                title: '关闭弹窗',
+              },
+              '×'
+            )
+          ),
+          h(
+            'div',
+            { className: 'dsh-au-cloud-sync-toolbar' },
+            h(
+              'div',
+              { className: 'dsh-au-cloud-sync-tabs', role: 'tablist' },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  role: 'tab',
+                  'aria-selected': !isPluginTab,
+                  className: `dsh-au-cloud-sync-tab${!isPluginTab ? ' is-active' : ''}`,
+                  onClick: () => setActiveTab('official'),
+                },
+                `DSH 官方设置 (${currentSelectedItems.length}/${allList.length})`,
+                officialTabDiffCount > 0
+                  ? h('span', { className: 'dsh-au-cloud-sync-tab-badge' }, `${officialTabDiffCount} 项不一致`)
+                  : null
+              ),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  role: 'tab',
+                  'aria-selected': isPluginTab,
+                  className: `dsh-au-cloud-sync-tab${isPluginTab ? ' is-active' : ''}`,
+                  onClick: () => setActiveTab('plugins'),
+                },
+                `云插件与配置 (${currentSelectedPlugins.length}/${allPluginList.length})`,
+                pluginTabDiffCount > 0
+                  ? h('span', { className: 'dsh-au-cloud-sync-tab-badge' }, `${pluginTabDiffCount} 项不一致`)
+                  : null
+              )
+            ),
+            h(
+              'div',
+              { className: 'dsh-au-cloud-sync-bulk-actions' },
+              !isPluginTab
+                ? h(
+                    'button',
+                    { type: 'button', className: 'dsh-au-btn', disabled: busy, onClick: handleToggleExpandAll },
+                    allExpanded ? '全部收起' : '全部展开对比'
+                  )
+                : null,
+              h('button', { type: 'button', className: 'dsh-au-btn', disabled: busy, onClick: handleSelectAll }, '全选'),
+              h('button', { type: 'button', className: 'dsh-au-btn', disabled: busy, onClick: handleDeselectAll }, '全不选')
+            )
+          ),
+          totalDiffCount > 0
+            ? h(
+                'div',
+                { className: 'dsh-au-cloud-sync-diff-banner', role: 'status' },
+                `⚠ 检测到本地与云端有 ${totalDiffCount} 项不一致（${diffTitleSummary}）。若要上传当前修改，请点左下角「本地推送到云」；若要还原云端配置，请点「保存并云同步到本地」。`
+              )
+            : null,
+          h(
+            'div',
+            { className: 'dsh-au-cloud-sync-list' },
+            !isPluginTab
+              ? h(
+                  'div',
+                  { className: 'dsh-au-cloud-sync-pref-section' },
+                  h('p', { className: 'dsh-au-cloud-sync-pref-title' }, '本机设置（按电脑各存一份，互不覆盖）'),
+                  preferenceList.map(item => {
+                    const jump = PREFERENCE_JUMPS[item.id];
+                    const prefInSync = item.inSync !== false;
+                    const prefDiffLabel = item.diffLabel || (prefInSync ? '✓ 与云一致' : '本地与云不一致');
+                    return h(
+                    'div',
+                    {
+                      key: item.id,
+                      className: `dsh-au-cloud-sync-item${preferenceMap[item.id] ? ' is-checked' : ''}${!prefInSync ? ' is-diff' : ''}`,
+                    },
+                    h(
+                      'div',
+                      {
+                        className: 'dsh-au-cloud-sync-item-main',
+                        style: { alignItems: 'center' },
+                        onClick: () => { if (!busy) togglePreference(item.id); },
+                      },
+                      h('input', {
+                        type: 'checkbox',
+                        checked: Boolean(preferenceMap[item.id]),
+                        disabled: busy,
+                        style: { marginTop: 0 },
+                        onClick: (e) => e.stopPropagation(),
+                        onChange: () => togglePreference(item.id),
+                      }),
+                      h(
+                        'div',
+                        { className: 'dsh-au-cloud-sync-item-body' },
+                        h(
+                          'div',
+                          { className: 'dsh-au-cloud-sync-item-head' },
+                          h('span', { className: 'dsh-au-cloud-sync-item-cat' }, item.category || '本机设置'),
+                          h('span', { className: 'dsh-au-cloud-sync-item-title' }, item.title),
+                          item.inSync !== undefined
+                            ? h(
+                                'span',
+                                {
+                                  className: `dsh-au-cloud-sync-diff-badge ${prefInSync ? 'is-sync' : 'is-diff'}`,
+                                },
+                                prefDiffLabel
+                              )
+                            : null,
+                          jump ? null : h('span', { className: 'dsh-au-cloud-sync-item-diff' }, item.defaultDiff)
+                        )
+                      ),
+                      jump ? h(
+                        'button',
+                        {
+                          type: 'button',
+                          className: 'dsh-au-btn dsh-au-cloud-sync-pref-jump',
+                          title: jump.title,
+                          'aria-label': jump.title,
+                          onClick: (event) => {
+                            event.stopPropagation();
+                            event.preventDefault();
+                            window.dispatchEvent(new CustomEvent('dsh-au-open-settings-modal', {
+                              detail: { anchor: jump.anchor },
+                            }));
+                          },
+                        },
+                        jump.label
+                      ) : null
+                    )
+                  );
+                  })
+                )
+              : null,
+            activeList.map(item => {
+              const checked = isPluginTab ? Boolean(selectedPluginsMap[item.id]) : Boolean(selectedMap[item.id]);
+              if (isPluginTab) {
+                const inSync = item.inSync !== false;
+                const diffLabel = item.diffLabel || (inSync ? '✓ 与云一致' : '有差异');
+                return h(
+                  'div',
+                  {
+                    key: item.id,
+                    className: `dsh-au-cloud-sync-item${checked ? ' is-checked' : ''}`,
+                  },
+                  h(
+                    'div',
+                    {
+                      className: 'dsh-au-cloud-sync-item-main',
+                      style: { alignItems: 'center' },
+                      onClick: () => { if (!busy) handleToggle(item.id); },
+                    },
+                    h('input', {
+                      type: 'checkbox',
+                      checked,
+                      disabled: busy,
+                      style: { marginTop: 0 },
+                      onClick: (e) => e.stopPropagation(),
+                      onChange: () => handleToggle(item.id),
+                    }),
+                    h(
+                      'div',
+                      { className: 'dsh-au-cloud-sync-item-body' },
+                      h(
+                        'div',
+                        { className: 'dsh-au-cloud-sync-item-head' },
+                        h('span', { className: 'dsh-au-cloud-sync-item-cat' }, item.category || '云插件'),
+                        h('span', { className: 'dsh-au-cloud-sync-item-title' }, item.title),
+                        h(
+                          'span',
+                          {
+                            className: `dsh-au-cloud-sync-diff-badge ${inSync ? 'is-sync' : 'is-diff'}`,
+                          },
+                          diffLabel
+                        ),
+                        h(
+                          'span',
+                          { className: 'dsh-au-cloud-sync-row-actions', onClick: (e) => e.stopPropagation() },
+                          !inSync && typeof onSyncSinglePlugin === 'function'
+                            ? [
+                                h(
+                                  'button',
+                                  {
+                                    key: 'pull',
+                                    type: 'button',
+                                    className: 'dsh-au-cloud-sync-mini-btn',
+                                    disabled: busy,
+                                    title: '仅用云端快照覆盖该插件的本机配置与启用状态（云 → 本地）',
+                                    onClick: () => onSyncSinglePlugin({ profile, pluginId: item.id, direction: 'pull' }),
+                                  },
+                                  '云→本地'
+                                ),
+                                h(
+                                  'button',
+                                  {
+                                    key: 'push',
+                                    type: 'button',
+                                    className: 'dsh-au-cloud-sync-mini-btn',
+                                    disabled: busy,
+                                    title: '仅用本机该插件的版本、启用状态与配置覆盖云端快照（本地 → 云）',
+                                    onClick: () => onSyncSinglePlugin({ profile, pluginId: item.id, direction: 'push' }),
+                                  },
+                                  '本地→云'
+                                ),
+                              ]
+                            : null,
+                          h(
+                            'span',
+                            {
+                              className: `dsh-au-cloud-sync-plugin-state ${checked ? 'is-enabled' : 'is-disabled'}`,
+                            },
+                            checked ? '实时同步已开启' : '未开启同步'
+                          )
+                        )
+                      )
+                    )
+                  )
+                );
+              }
+              const expanded = Boolean(expandedMap[item.id]);
+              const isModelItem = item.id === 'llm-providers';
+              const comparisons = resolveItemComparisons(item, profile);
+              const officialInSync = item.inSync !== false;
+              const officialDiffLabel = item.diffLabel || (officialInSync ? '✓ 与云一致' : '本地与云不一致');
+              const officialDiffDetails = Array.isArray(item.diffDetails) ? item.diffDetails : [];
+              return h(
+                'div',
+                {
+                  key: item.id,
+                  className: `dsh-au-cloud-sync-item${checked ? ' is-checked' : ''}${expanded ? ' is-expanded' : ''}${!officialInSync ? ' is-diff' : ''}`,
+                },
+                h(
+                  'div',
+                  {
+                    className: 'dsh-au-cloud-sync-item-main',
+                    onClick: () => handleToggleExpand(item.id),
+                  },
+                  h('input', {
+                    type: 'checkbox',
+                    checked,
+                    disabled: busy,
+                    onClick: (e) => e.stopPropagation(),
+                    onChange: () => handleToggle(item.id),
+                  }),
+                  h(
+                    'div',
+                    { className: 'dsh-au-cloud-sync-item-body' },
+                    h(
+                      'div',
+                      { className: 'dsh-au-cloud-sync-item-head' },
+                      h('span', { className: 'dsh-au-cloud-sync-item-cat' }, item.category || '设置'),
+                      h('span', { className: 'dsh-au-cloud-sync-item-title' }, item.title),
+                      item.inSync !== undefined
+                        ? h(
+                            'span',
+                            {
+                              className: `dsh-au-cloud-sync-diff-badge ${officialInSync ? 'is-sync' : 'is-diff'}`,
+                              title: officialDiffDetails.length > 0 ? `差异区块：${officialDiffDetails.join('、')}` : undefined,
+                            },
+                            officialDiffLabel
+                          )
+                        : null,
+                      h('span', { className: 'dsh-au-cloud-sync-item-count' }, `${comparisons.length} 项对比`),
+                      isModelItem
+                        ? h(
+                            'span',
+                            {
+                              className: 'dsh-au-cloud-sync-profile-picker',
+                              onClick: (e) => { e.preventDefault(); e.stopPropagation(); },
+                            },
+                            h('span', { className: 'dsh-au-cloud-sync-profile-label' }, '模型方案：'),
+                            h(
+                              'select',
+                              {
+                                className: 'dsh-au-cloud-sync-profile-select',
+                                value: profile,
+                                disabled: busy,
+                                onClick: (e) => e.stopPropagation(),
+                                onChange: (e) => setProfile(e.target.value),
+                              },
+                              CLOUD_SYNC_PROFILE_OPTIONS.map(opt =>
+                                h('option', { key: opt.id, value: opt.id }, opt.label)
+                              )
+                            )
+                          )
+                        : null,
+                      h(
+                        'button',
+                        {
+                          type: 'button',
+                          className: 'dsh-au-cloud-sync-expand-btn',
+                          onClick: (e) => { e.stopPropagation(); handleToggleExpand(item.id); },
+                          'aria-expanded': expanded,
+                        },
+                        expanded ? '收起 ▴' : '展开对比 ▾'
+                      )
+                    ),
+                    !expanded && item.defaultDiff
+                      ? h('span', { className: 'dsh-au-cloud-sync-item-diff' }, item.defaultDiff)
+                      : null
+                  )
+                ),
+                expanded && comparisons.length > 0
+                  ? h(
+                      'div',
+                      { className: 'dsh-au-cloud-sync-compare-box' },
+                      !officialInSync
+                        ? h(
+                            'div',
+                            { className: 'dsh-au-cloud-sync-compare-diff-note' },
+                            officialDiffDetails.length > 0
+                              ? `本地与当前云端配置不一致（差异区块：${officialDiffDetails.join('、')}）`
+                              : '本地实际配置与当前云端配置不一致，可选择「本地推送到云」或「保存并云同步到本地」。'
+                          )
+                        : null,
+                      h(
+                        'div',
+                        { className: 'dsh-au-cloud-sync-compare-header' },
+                        h('span', null, '设置细项'),
+                        h('span', null, '官方默认'),
+                        h('span', null, '当前云端配置')
+                      ),
+                      comparisons.map((row, idx) =>
+                        h(
+                          'div',
+                          { key: idx, className: 'dsh-au-cloud-sync-compare-row' },
+                          h('span', { className: 'dsh-au-cloud-sync-compare-label' }, row.label),
+                          h('span', { className: 'dsh-au-cloud-sync-compare-default' }, row.defaultValue),
+                          h(
+                            'span',
+                            { className: 'dsh-au-cloud-sync-compare-current' },
+                            h('span', { className: 'dsh-au-cloud-sync-compare-arrow' }, '→'),
+                            row.currentValue
+                          )
+                        )
+                      )
+                    )
+                  : null
+              );
+            })
+          ),
+          message
+            ? h(
+                'div',
+                {
+                  className: `dsh-au-cloud-sync-modal-status ${/失败|异常|错误/.test(message) ? 'is-error' : 'is-success'}`,
+                  role: 'status',
+                },
+                message
+              )
+            : null,
+          h(
+            'div',
+            { className: 'dsh-au-cloud-sync-modal-footer' },
+            h(
+              'div',
+              { className: 'dsh-au-cloud-sync-modal-footer-left' },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dsh-au-btn',
+                  disabled: busy,
+                  title: '把本机当前已勾选的官方设置及插件启用状态/配置写回云端仓库快照（本机 → 云）',
+                  onClick: () => onPushToRepo(buildPayload()),
+                },
+                busy ? '正在推送...' : '本地推送到云'
+              )
+            ),
+            h(
+              'div',
+              { className: 'dsh-au-cloud-sync-modal-footer-right' },
+              h('button', { type: 'button', className: 'dsh-au-btn', disabled: busy, onClick: onClose }, '取消'),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dsh-au-btn',
+                  disabled: busy,
+                  onClick: () => onSave(buildPayload()),
+                },
+                '仅保存勾选'
+              ),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dsh-au-btn dsh-au-btn-primary',
+                  disabled: busy,
+                  title: '保存当前勾选，并立即把云端仓库的设置与插件启用状态/配置同步到这台电脑（云 → 本机）',
+                  onClick: () => onSaveAndSync(buildPayload()),
+                },
+                busy ? '正在同步...' : '保存并云同步到本地'
+              )
+            )
+          )
+        )
+      );
+    }
+
+    /** 云端配置自动同步区块 */
+    function CloudSyncFeatureGroup() {
+      const [cloudSync, setCloudSync] = useState({
+        enabled: false,
+        profile: 'generic',
+        selectedItems: FALLBACK_CLOUD_SYNC_ITEMS.map(i => i.id),
+        customized: false,
+        selectedPlugins: FALLBACK_CLOUD_SYNC_PLUGINS.map(p => p.id),
+        syncPluginConfigs: FALLBACK_CLOUD_SYNC_PLUGINS.map(p => p.id),
+        pluginsCustomized: false,
+        selectedPreferences: FALLBACK_PREFERENCE_ITEMS.map(i => i.id),
+        lastSyncedHash: '',
+        lastSyncedAt: '',
+        inSync: true,
+        restartRequired: false,
+      });
+      const [items, setItems] = useState(FALLBACK_CLOUD_SYNC_ITEMS);
+      const [itemsByProfile, setItemsByProfile] = useState(null);
+      const [pluginItems, setPluginItems] = useState(FALLBACK_CLOUD_SYNC_PLUGINS);
+      const [preferenceItems, setPreferenceItems] = useState(FALLBACK_PREFERENCE_ITEMS);
+      const [machineId, setMachineId] = useState('');
+      const [syncRepoRoot, setSyncRepoRoot] = useState('');
+      const savedSyncRepoRootRef = useRef('');
+      const [repoPathRestart, setRepoPathRestart] = useState(false);
+      const [loaded, setLoaded] = useState(false);
+      const [busy, setBusy] = useState(false);
+      const [message, setMessage] = useState('');
+      const [modalOpen, setModalOpen] = useState(false);
+      const shortcutOverrides = useShortcutOverrides();
+      const modelShortcutSnapshot = useModelShortcuts();
+
+      const applyCloudSyncResponse = (res) => {
+        if (!res?.ok) return;
+        if (res.cloudSync) setCloudSync(prev => ({ ...prev, ...res.cloudSync }));
+        if (Array.isArray(res.items) && res.items.length > 0) setItems(res.items);
+        if (res.itemsByProfile && typeof res.itemsByProfile === 'object') setItemsByProfile(res.itemsByProfile);
+        if (Array.isArray(res.pluginItems)) setPluginItems(res.pluginItems);
+        if (Array.isArray(res.preferenceItems) && res.preferenceItems.length > 0) setPreferenceItems(res.preferenceItems);
+        if (typeof res.machineId === 'string') setMachineId(res.machineId);
+        if (typeof res.syncRepoRoot === 'string') {
+          setSyncRepoRoot(res.syncRepoRoot);
+          savedSyncRepoRootRef.current = res.syncRepoRoot.trim();
+        }
+      };
+
+      const refreshSettings = async () => {
+        try {
+          const res = await callApi('getCloudSyncSettings');
+          if (res?.ok) {
+            applyCloudSyncResponse(res);
+            setLoaded(true);
+          }
+        } catch {
+          // 兜底保持默认
+          setLoaded(true);
+        }
+      };
+
+      useEffect(() => {
+        void refreshSettings();
+      }, []);
+
+      const handleToggle = async () => {
+        const nextEnabled = !cloudSync.enabled;
+        setBusy(true);
+        setMessage('');
+        try {
+          const res = await callApi('saveCloudSyncSettings', {
+            enabled: nextEnabled,
+            profile: cloudSync.profile,
+            selectedItems: cloudSync.selectedItems,
+            selectedPlugins: cloudSync.selectedPlugins,
+            syncPluginConfigs: cloudSync.syncPluginConfigs,
+            selectedPreferences: cloudSync.selectedPreferences,
+          });
+          if (res?.ok && res.cloudSync) {
+            applyCloudSyncResponse(res);
+            setMessage(nextEnabled ? '已开启云端配置自动同步' : '已关闭云端配置自动同步');
+          } else {
+            setCloudSync(prev => ({ ...prev, enabled: nextEnabled }));
+          }
+        } catch {
+          setMessage('保存开关状态失败');
+        } finally {
+          setBusy(false);
+        }
+      };
+
+      const handleRunSync = async (targetPayload) => {
+        setBusy(true);
+        setMessage('');
+        try {
+          const payload = targetPayload || {
+            profile: cloudSync.profile,
+            selectedItems: cloudSync.selectedItems,
+            selectedPlugins: cloudSync.selectedPlugins,
+            syncPluginConfigs: cloudSync.syncPluginConfigs,
+            selectedPreferences: cloudSync.selectedPreferences,
+          };
+          const res = await callApi('runCloudSyncNow', payload);
+          if (res?.ok) {
+            applyCloudSyncResponse(res);
+            if (res.restartRequired !== undefined) {
+              setCloudSync(prev => ({ ...prev, restartRequired: Boolean(res.restartRequired) }));
+            }
+            void loadFeatures();
+            if (typeof loadModelShortcuts === 'function') void loadModelShortcuts();
+            setMessage(res.message || '立即同步成功');
+          } else {
+            setMessage(res?.error || '同步失败，请检查脚本输出');
+          }
+        } catch {
+          setMessage('同步请求异常');
+        } finally {
+          setBusy(false);
+        }
+      };
+
+      const handleSaveModal = async ({ profile, selectedItems, selectedPlugins, syncPluginConfigs, selectedPreferences }) => {
+        setBusy(true);
+        setMessage('');
+        try {
+          const res = await callApi('saveCloudSyncSettings', {
+            enabled: cloudSync.enabled,
+            profile,
+            selectedItems,
+            selectedPlugins,
+            syncPluginConfigs,
+            selectedPreferences,
+          });
+          if (res?.ok && res.cloudSync) {
+            applyCloudSyncResponse(res);
+            setMessage('同步配置已更新');
+            setModalOpen(false);
+          } else {
+            setCloudSync(prev => ({ ...prev, profile, selectedItems, selectedPlugins, syncPluginConfigs, selectedPreferences }));
+            setModalOpen(false);
+          }
+        } catch {
+          setMessage('保存失败');
+        } finally {
+          setBusy(false);
+        }
+      };
+
+      const handleSaveAndSyncModal = async ({ profile, selectedItems, selectedPlugins, syncPluginConfigs, selectedPreferences }) => {
+        setBusy(true);
+        setMessage('');
+        try {
+          const res = await callApi('saveCloudSyncSettings', {
+            enabled: cloudSync.enabled,
+            profile,
+            selectedItems,
+            selectedPlugins,
+            syncPluginConfigs,
+            selectedPreferences,
+          });
+          if (res?.ok && res.cloudSync) {
+            applyCloudSyncResponse(res);
+          }
+          await handleRunSync({ profile, selectedItems, selectedPlugins, syncPluginConfigs, selectedPreferences });
+          setModalOpen(false);
+        } catch {
+          setMessage('保存并同步异常');
+        } finally {
+          setBusy(false);
+        }
+      };
+
+      const handlePushToRepo = async ({ profile, selectedItems, selectedPlugins, syncPluginConfigs, selectedPreferences }) => {
+        setBusy(true);
+        setMessage('');
+        try {
+          const clientPreferences = {
+            mobileEnabled: readMobileFeatureEnabled(),
+            shortcutOverrides: readShortcutOverrides(),
+          };
+          const res = await callApi('pushCloudSyncToRepo', {
+            profile,
+            selectedItems,
+            selectedPlugins,
+            syncPluginConfigs,
+            selectedPreferences,
+            clientPreferences,
+          });
+          if (res?.ok) {
+            applyCloudSyncResponse(res);
+            setMessage(res.message || '已成功将当前设置推送到仓库');
+          } else {
+            setMessage(res?.error || '推送到仓库失败');
+          }
+        } catch {
+          setMessage('推送请求异常');
+        } finally {
+          setBusy(false);
+        }
+      };
+
+      const handleSyncSinglePlugin = async ({ profile, pluginId, direction }) => {
+        setBusy(true);
+        setMessage('');
+        try {
+          const clientPreferences = {
+            mobileEnabled: readMobileFeatureEnabled(),
+            shortcutOverrides: readShortcutOverrides(),
+          };
+          const res = await callApi(direction === 'push' ? 'pushCloudSyncToRepo' : 'runCloudSyncNow', {
+            profile,
+            singlePluginOnly: true,
+            pluginId,
+            clientPreferences,
+          });
+          if (res?.ok) {
+            applyCloudSyncResponse(res);
+            if (direction === 'pull') void loadFeatures();
+            setMessage(direction === 'push' ? `已将 ${pluginId} 本地状态推送到云` : `已将 ${pluginId} 从云同步到本地`);
+          } else {
+            setMessage(res?.error || '单插件同步失败');
+          }
+        } catch {
+          setMessage('单插件同步异常');
+        } finally {
+          setBusy(false);
+        }
+      };
+
+      const handleRestartDsh = async () => {
+        try {
+          await callApi('restartDsh');
+        } catch {}
+      };
+
+      const titleId = 'dsh-au-feature-cloud-sync-title';
+      const allItems = (itemsByProfile && Array.isArray(itemsByProfile[cloudSync.profile]) && itemsByProfile[cloudSync.profile].length > 0)
+        ? itemsByProfile[cloudSync.profile]
+        : (items && items.length > 0 ? items : FALLBACK_CLOUD_SYNC_ITEMS);
+      const allPluginItems = Array.isArray(pluginItems) ? pluginItems : FALLBACK_CLOUD_SYNC_PLUGINS;
+      const resolvedPreferenceItems = resolvePreferenceSyncItems(preferenceItems, shortcutOverrides, modelShortcutSnapshot);
+      const selectedCount = (cloudSync.selectedItems || []).length;
+      const selectedPluginCount = (cloudSync.selectedPlugins || []).length;
+      const selectedPreferenceCount = (cloudSync.selectedPreferences || []).length;
+      const totalDiffCount = loaded
+        ? allItems.filter(i => i.inSync === false).length
+          + allPluginItems.filter(p => p.inSync === false).length
+          + resolvedPreferenceItems.filter(p => p.inSync === false).length
+        : 0;
+      const selectionHint = `设置 ${selectedCount}/${allItems.length} · 插件 ${selectedPluginCount}/${allPluginItems.length} · 本机 ${selectedPreferenceCount}/${resolvedPreferenceItems.length}`;
+
+      return h(
+        'section',
+        { className: 'dsh-au-settings-group', 'aria-labelledby': titleId },
+        h('h3', { id: titleId }, '云端配置自动同步'),
+        h(SettingsItem, {
+          title: '开启云端配置自动同步',
+          description: [
+            '拉取配置仓库或启动 DSH 时，自动复用 #71 还原脚本。',
+            h('br'),
+            '将已勾选的官方设置、Codex 模型目录及云插件同步到本机。',
+          ],
+          hint: selectionHint,
+          control: h(
+            'button',
+            {
+              type: 'button',
+              role: 'switch',
+              className: 'dsh-au-switch',
+              'aria-checked': cloudSync.enabled,
+              'aria-labelledby': titleId,
+              disabled: busy,
+              onClick: () => void handleToggle(),
+            },
+            h('span', { className: 'dsh-au-switch-knob', 'aria-hidden': 'true' })
+          ),
+          actions: h(
+            'button',
+            {
+              type: 'button',
+              className: 'dsh-au-btn',
+              onClick: () => {
+                setMessage('');
+                setModalOpen(true);
+                void refreshSettings();
+              },
+            },
+            '选择同步项',
+            totalDiffCount > 0
+              ? h('span', { className: 'dsh-au-cloud-sync-outer-diff' }, `${totalDiffCount} 项待同步`)
+              : null
+          ),
+        }),
+        h(SettingsItem, {
+          title: '私人同步仓库路径',
+          description: '指向包含 dsh-sync 或 dsh-au/sync 的本地仓库；留空则只用插件自带的示例 sync/。',
+          extra: h('input', {
+            className: 'dsh-au-input',
+            placeholder: '~/Projects/my-sync-config',
+            value: syncRepoRoot,
+            disabled: busy,
+            onChange: (event) => setSyncRepoRoot(event.target.value),
+            onBlur: async () => {
+              const previous = savedSyncRepoRootRef.current;
+              const nextPath = syncRepoRoot.trim();
+              if (nextPath === previous) return;
+              setBusy(true);
+              try {
+                const res = await callApi('saveCloudSyncSettings', { syncRepoRoot: nextPath });
+                if (!res?.ok) {
+                  setMessage('保存私人同步仓库路径失败');
+                  return;
+                }
+                const saved = typeof res.syncRepoRoot === 'string' ? res.syncRepoRoot.trim() : nextPath;
+                setSyncRepoRoot(saved);
+                savedSyncRepoRootRef.current = saved;
+                if (saved !== previous) {
+                  setRepoPathRestart(true);
+                  setMessage('路径已更改，请重启 DSH 后生效');
+                }
+              } catch {
+                setMessage('保存私人同步仓库路径失败');
+              } finally {
+                setBusy(false);
+              }
+            },
+          }),
+          hint: [
+            cloudSync.lastSyncedAt ? `上次同步：${cloudSync.lastSyncedAt}` : '',
+            message,
+          ],
+          actions: (cloudSync.restartRequired || repoPathRestart)
+            ? h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dsh-au-btn',
+                  onClick: handleRestartDsh,
+                },
+                '立即重启 DSH'
+              )
+            : null,
+        }),
+        h(CloudSyncModal, {
+          isOpen: modalOpen,
+          onClose: () => setModalOpen(false),
+          cloudSync,
+          items: allItems,
+          itemsByProfile,
+          pluginItems: allPluginItems,
+          preferenceItems: resolvedPreferenceItems,
+          machineId,
+          onSave: handleSaveModal,
+          onSaveAndSync: handleSaveAndSyncModal,
+          onPushToRepo: handlePushToRepo,
+          onSyncSinglePlugin: handleSyncSinglePlugin,
+          busy,
+          message,
+        })
+      );
+    }
+
+    const SETTINGS_CATEGORY_STORAGE_KEY = 'dsh-au.settings-categories.v1';
+
+    /** 读取某个设置大类是否展开；没有记录时用页面默认值。 */
+    function readSettingsCategoryOpen(id, defaultOpen) {
+      try {
+        const raw = localStorage.getItem(SETTINGS_CATEGORY_STORAGE_KEY);
+        if (!raw) return defaultOpen;
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && Object.prototype.hasOwnProperty.call(parsed, id)) {
+          return parsed[id] === true;
+        }
+      } catch {}
+      return defaultOpen;
+    }
+
+    function writeSettingsCategoryOpen(id, open) {
+      try {
+        const raw = localStorage.getItem(SETTINGS_CATEGORY_STORAGE_KEY);
+        const parsed = raw ? JSON.parse(raw) : {};
+        if (!parsed || typeof parsed !== 'object') return;
+        parsed[id] = open;
+        localStorage.setItem(SETTINGS_CATEGORY_STORAGE_KEY, JSON.stringify(parsed));
+      } catch {}
+    }
+
+    /** 设置页大类：标题可折叠，记住展开状态，组内仍复用原有开关行。 */
+    function SettingsCategory({ id, title, hint, defaultOpen = false, children }) {
+      const [open, setOpen] = useState(() => readSettingsCategoryOpen(id, defaultOpen));
+      const panelId = `dsh-au-settings-cat-${id}`;
+      return h(
+        'div',
+        { className: `dsh-au-settings-category${open ? ' is-open' : ''}`, 'data-category': id },
+        h(
+          'button',
+          {
+            type: 'button',
+            className: 'dsh-au-settings-category-toggle',
+            'aria-expanded': open,
+            'aria-controls': panelId,
+            onClick: () => {
+              const next = !open;
+              setOpen(next);
+              writeSettingsCategoryOpen(id, next);
+            },
+          },
+          h('span', { className: 'dsh-au-settings-category-title' }, title),
+          h('span', { className: 'dsh-au-settings-category-hint' }, open ? '' : hint),
+          h(DeviceBarChevron, { expanded: open })
+        ),
+        h('div', { id: panelId, className: 'dsh-au-settings-category-body', hidden: !open }, children)
+      );
+    }
+
+    function WindowMemoryFeatureGroup() {
+      const snapshot = useWindowState();
+      const titleId = 'dsh-au-window-memory-title';
+      const supported = snapshot.supported;
+      const hint = snapshot.error
+        || (supported ? describeWindowGeometry(snapshot.geometry) : '仅在 DSH 桌面端生效；浏览器访问时无法还原窗口。');
+      return h(
+        'section',
+        { className: 'dsh-au-settings-group', 'aria-labelledby': titleId },
+        h('h3', { id: titleId }, '窗口位置与大小'),
+        h(SettingsItem, {
+          title: '启动时还原窗口',
+          description: '记住关闭前的位置、大小和所在显示器，下次启动自动还原；最大化时直接还原为系统最大化。',
+          hint,
+          control: h(
+            'button',
+            {
+              type: 'button',
+              role: 'switch',
+              className: 'dsh-au-switch',
+              'aria-checked': snapshot.enabled,
+              'aria-labelledby': titleId,
+              disabled: !supported || snapshot.busy,
+              onClick: () => { void windowStateController?.setEnabled(!snapshot.enabled); },
+            },
+            h('span', { className: 'dsh-au-switch-knob', 'aria-hidden': 'true' })
+          ),
+        })
+      );
+    }
+
+    /** 设置页按使用频率分组：日常工作台、对话权限默认展开，快捷键和同步默认收起。 */
+    function AuSettingsSection() {
+      return h(
+        'div',
+        { className: 'dsh-au-settings-page' },
+        h(SettingsCategory, { id: 'workspace', title: '工作台', hint: '待办 · 移动端 · 窗口', defaultOpen: true },
+          h(TodoFeatureGroup),
+          h(MobileFeatureGroup),
+          h(WindowMemoryFeatureGroup),
+          h(LockRemoteFeatureGroup)
+        ),
+        h(SettingsCategory, { id: 'conversation', title: '对话与权限', hint: '权限 · 目标 · 续跑', defaultOpen: true },
+          h(FullAccessFeatureGroup),
+          h(GoalCreationFeatureGroup),
+          h(AutoContinueFeatureGroup)
+        ),
+        h(SettingsCategory, { id: 'shortcuts', title: '快捷操作', hint: '快捷键 · 模型', defaultOpen: false },
+          h(ShortcutSettingsSection),
+          h(ModelShortcutSettingsSection)
+        ),
+        h(SettingsCategory, { id: 'sync', title: '同步', hint: '官方设置与云插件', defaultOpen: false },
+          h(CloudSyncFeatureGroup)
+        )
+      );
+    }
+

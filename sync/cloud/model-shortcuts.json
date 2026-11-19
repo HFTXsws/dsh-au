@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "enabled": false,
+  "binding": {
+    "code": "KeyM",
+    "ctrl": false,
+    "alt": true,
+    "shift": false,
+    "meta": false
+  },
+  "slots": [null, null, null, null, null, null, null, null, null]
+}

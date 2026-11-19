@@ -1,0 +1,615 @@
+{
+ "t": "div",
+ "p": {
+  "className": "dsh-au-mask",
+  "onClick": "[fn]"
+ },
+ "c": {
+  "t": "div",
+  "p": {
+   "aria-modal": "true",
+   "className": "dsh-au-wb-modal",
+   "role": "dialog"
+  },
+  "c": [
+   {
+    "t": "header",
+    "p": {
+     "className": "dsh-au-wb-head"
+    },
+    "c": [
+     {
+      "t": "input",
+      "p": {
+       "autoFocus": false,
+       "className": "dsh-au-wb-search",
+       "onChange": "[fn]",
+       "placeholder": "输入菜单序号、服务名或关键字检索...",
+       "value": ""
+      },
+      "c": null
+     },
+     {
+      "t": "div",
+      "p": {
+       "style": {
+        "display": "flex",
+        "alignItems": "center",
+        "gap": "8px"
+       }
+      },
+      "c": [
+       {
+        "t": "button",
+        "p": {
+         "className": "dsh-au-wb-pill on",
+         "onClick": "[fn]",
+         "title": "自动识别当前系统；点击可切换预览 Windows / macOS 专属菜单项",
+         "type": "button"
+        },
+        "c": "系统识别: macOS (.sh)"
+       },
+       {
+        "t": "button",
+        "p": {
+         "className": "dsh-au-btn",
+         "disabled": false,
+         "onClick": "[fn]",
+         "title": "立即重新检查后台服务运行状态（默认 1 小时自动缓存）",
+         "type": "button"
+        },
+        "c": "刷新"
+       },
+       {
+        "t": "button",
+        "p": {
+         "className": "dsh-au-btn",
+         "onClick": "[fn]",
+         "type": "button"
+        },
+        "c": "关闭 (Esc)"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "t": "div",
+    "p": {
+     "className": "dsh-au-wb-body"
+    },
+    "c": [
+     {
+      "t": "nav",
+      "p": {
+       "className": "dsh-au-wb-nav"
+      },
+      "c": [
+       {
+        "t": "button",
+        "p": {
+         "className": "dsh-au-wb-navbtn active",
+         "key": "nav-fav",
+         "onClick": "[fn]",
+         "type": "button"
+        },
+        "c": [
+         {
+          "t": "span",
+          "p": {
+           "className": "dsh-au-nav-main"
+          },
+          "c": [
+           {
+            "t": "span",
+            "p": {
+             "className": "dsh-au-nav-icon",
+             "key": "icon"
+            },
+            "c": {
+             "t": "StarIcon",
+             "p": {},
+             "c": null
+            }
+           },
+           {
+            "t": "span",
+            "p": {
+             "className": "dsh-au-nav-label",
+             "key": "label"
+            },
+            "c": "常用收藏"
+           }
+          ]
+         },
+         {
+          "t": "span",
+          "p": {
+           "className": "dsh-au-nav-count"
+          },
+          "c": "3"
+         }
+        ]
+       },
+       {
+        "t": "button",
+        "p": {
+         "className": "dsh-au-wb-navbtn ",
+         "key": "nav-services",
+         "onClick": "[fn]",
+         "type": "button"
+        },
+        "c": [
+         {
+          "t": "span",
+          "p": {
+           "className": "dsh-au-nav-main"
+          },
+          "c": [
+           {
+            "t": "span",
+            "p": {
+             "className": "dsh-au-nav-icon",
+             "key": "icon"
+            },
+            "c": {
+             "t": "ServicesIcon",
+             "p": {},
+             "c": null
+            }
+           },
+           {
+            "t": "span",
+            "p": {
+             "className": "dsh-au-nav-label",
+             "key": "label"
+            },
+            "c": "后台服务管理"
+           }
+          ]
+         },
+         {
+          "t": "span",
+          "p": {
+           "className": "dsh-au-nav-count"
+          },
+          "c": "2"
+         }
+        ]
+       },
+       {
+        "t": "button",
+        "p": {
+         "className": "dsh-au-wb-navbtn ",
+         "key": "nav-plugins",
+         "onClick": "[fn]",
+         "type": "button"
+        },
+        "c": [
+         {
+          "t": "span",
+          "p": {
+           "className": "dsh-au-nav-main"
+          },
+          "c": [
+           {
+            "t": "span",
+            "p": {
+             "className": "dsh-au-nav-icon",
+             "key": "icon"
+            },
+            "c": {
+             "t": "PluginIcon",
+             "p": {},
+             "c": null
+            }
+           },
+           {
+            "t": "span",
+            "p": {
+             "className": "dsh-au-nav-label",
+             "key": "label"
+            },
+            "c": "插件管理"
+           }
+          ]
+         },
+         {
+          "t": "span",
+          "p": {
+           "className": "dsh-au-nav-count"
+          },
+          "c": "2"
+         }
+        ]
+       },
+       {
+        "t": "button",
+        "p": {
+         "className": "dsh-au-wb-navbtn ",
+         "key": "nav-all",
+         "onClick": "[fn]",
+         "type": "button"
+        },
+        "c": [
+         {
+          "t": "span",
+          "p": {
+           "className": "dsh-au-nav-main"
+          },
+          "c": [
+           {
+            "t": "span",
+            "p": {
+             "className": "dsh-au-nav-icon",
+             "key": "icon"
+            },
+            "c": {
+             "t": "CommandMenuIcon",
+             "p": {},
+             "c": null
+            }
+           },
+           {
+            "t": "span",
+            "p": {
+             "className": "dsh-au-nav-label",
+             "key": "label"
+            },
+            "c": "全部菜单指令"
+           }
+          ]
+         },
+         {
+          "t": "span",
+          "p": {
+           "className": "dsh-au-nav-count"
+          },
+          "c": "6"
+         }
+        ]
+       },
+       {
+        "t": "button",
+        "p": {
+         "className": "dsh-au-wb-navbtn ",
+         "key": "basic",
+         "onClick": "[fn]",
+         "type": "button"
+        },
+        "c": [
+         {
+          "t": "span",
+          "p": {
+           "className": "dsh-au-nav-main"
+          },
+          "c": [
+           {
+            "t": "span",
+            "p": {
+             "className": "dsh-au-nav-icon",
+             "key": "icon"
+            },
+            "c": {
+             "t": "span",
+             "p": {
+              "className": "dsh-au-nav-dot"
+             },
+             "c": null
+            }
+           },
+           {
+            "t": "span",
+            "p": {
+             "className": "dsh-au-nav-label",
+             "key": "label"
+            },
+            "c": "基础"
+           }
+          ]
+         },
+         {
+          "t": "span",
+          "p": {
+           "className": "dsh-au-nav-count"
+          },
+          "c": "4"
+         }
+        ]
+       },
+       {
+        "t": "button",
+        "p": {
+         "className": "dsh-au-wb-navbtn ",
+         "key": "cursor",
+         "onClick": "[fn]",
+         "type": "button"
+        },
+        "c": [
+         {
+          "t": "span",
+          "p": {
+           "className": "dsh-au-nav-main"
+          },
+          "c": [
+           {
+            "t": "span",
+            "p": {
+             "className": "dsh-au-nav-icon",
+             "key": "icon"
+            },
+            "c": {
+             "t": "span",
+             "p": {
+              "className": "dsh-au-nav-dot"
+             },
+             "c": null
+            }
+           },
+           {
+            "t": "span",
+            "p": {
+             "className": "dsh-au-nav-label",
+             "key": "label"
+            },
+            "c": "Cursor"
+           }
+          ]
+         },
+         {
+          "t": "span",
+          "p": {
+           "className": "dsh-au-nav-count"
+          },
+          "c": "2"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": "section",
+      "p": {
+       "className": "dsh-au-wb-center"
+      },
+      "c": {
+       "t": "div",
+       "p": {
+        "className": "dsh-au-wb-grid"
+       },
+       "c": [
+        {
+         "t": "div",
+         "p": {
+          "className": "dsh-au-wb-card selected",
+          "key": "11",
+          "onClick": "[fn]",
+          "onDoubleClick": "[fn]"
+         },
+         "c": [
+          {
+           "t": "div",
+           "p": {
+            "className": "dsh-au-card-head"
+           },
+           "c": [
+            {
+             "t": "span",
+             "p": {
+              "className": "dsh-au-card-id",
+              "key": "id"
+             },
+             "c": "#11 · 基础"
+            },
+            {
+             "t": "button",
+             "p": {
+              "className": "dsh-au-card-btn",
+              "data-tone": "on",
+              "key": "fav",
+              "onClick": "[fn]",
+              "type": "button"
+             },
+             "c": "★ 已收藏"
+            }
+           ]
+          },
+          {
+           "t": "div",
+           "p": {
+            "className": "dsh-au-card-title"
+           },
+           "c": "同步 Skill"
+          },
+          {
+           "t": "div",
+           "p": {
+            "className": "dsh-au-card-desc"
+           },
+           "c": "把仓库 Skill 同步到各端"
+          }
+         ]
+        },
+        {
+         "t": "div",
+         "p": {
+          "className": "dsh-au-wb-card ",
+          "key": "45",
+          "onClick": "[fn]",
+          "onDoubleClick": "[fn]"
+         },
+         "c": [
+          {
+           "t": "div",
+           "p": {
+            "className": "dsh-au-card-head"
+           },
+           "c": [
+            {
+             "t": "span",
+             "p": {
+              "className": "dsh-au-card-id",
+              "key": "id"
+             },
+             "c": "#45 · Cursor"
+            },
+            {
+             "t": "button",
+             "p": {
+              "className": "dsh-au-card-btn",
+              "data-tone": "on",
+              "key": "fav",
+              "onClick": "[fn]",
+              "type": "button"
+             },
+             "c": "★ 已收藏"
+            }
+           ]
+          },
+          {
+           "t": "div",
+           "p": {
+            "className": "dsh-au-card-title"
+           },
+           "c": "Cursor 规则"
+          },
+          {
+           "t": "div",
+           "p": {
+            "className": "dsh-au-card-desc"
+           },
+           "c": "同步规则"
+          }
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "t": "aside",
+      "p": {
+       "className": "dsh-au-wb-inspector"
+      },
+      "c": {
+       "t": "#fragment",
+       "p": {},
+       "c": [
+        {
+         "t": "div",
+         "p": {
+          "className": "dsh-au-insp-head"
+         },
+         "c": [
+          {
+           "t": "span",
+           "p": {
+            "className": "dsh-au-insp-name"
+           },
+           "c": "同步 Skill"
+          },
+          {
+           "t": "span",
+           "p": {
+            "className": "dsh-au-insp-id"
+           },
+           "c": "#11"
+          }
+         ]
+        },
+        {
+         "t": "div",
+         "p": {
+          "className": "dsh-au-insp-desc"
+         },
+         "c": "把仓库 Skill 同步到各端"
+        },
+        {
+         "t": "div",
+         "p": {
+          "className": "dsh-au-act"
+         },
+         "c": [
+          {
+           "t": "button",
+           "p": {
+            "className": "dsh-au-btn on",
+            "onClick": "[fn]",
+            "type": "button"
+           },
+           "c": "在插件内执行"
+          },
+          {
+           "t": "button",
+           "p": {
+            "className": "dsh-au-btn",
+            "onClick": "[fn]",
+            "type": "button"
+           },
+           "c": "系统终端"
+          }
+         ]
+        },
+        {
+         "t": "section",
+         "p": {
+          "style": {
+           "marginTop": "auto",
+           "borderTop": "1px solid #1f2637",
+           "paddingTop": "10px"
+          }
+         },
+         "c": [
+          {
+           "t": "button",
+           "p": {
+            "aria-expanded": false,
+            "className": "dsh-au-wb-pill ",
+            "onClick": "[fn]",
+            "style": {
+             "width": "100%",
+             "justifyContent": "space-between",
+             "padding": "8px 10px"
+            },
+            "type": "button"
+           },
+           "c": [
+            {
+             "t": "span",
+             "p": {},
+             "c": "🔧 调试详情（执行命令与原始日志）"
+            },
+            {
+             "t": "span",
+             "p": {},
+             "c": "展开"
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   },
+   {
+    "t": "footer",
+    "p": {
+     "className": "dsh-au-wb-foot"
+    },
+    "c": [
+     {
+      "t": "span",
+      "p": {},
+      "c": "支持序号直达 (11-71) · 双击无参卡片直接执行 · 后台服务独立于 DSH 运行，支持按电脑保存自启组合"
+     },
+     {
+      "t": "span",
+      "p": {},
+      "c": "本机: TestBook · SSOT: scripts/menu.json"
+     }
+    ]
+   }
+  ]
+ }
+}

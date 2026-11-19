@@ -1,0 +1,812 @@
+{
+ "t": "div",
+ "p": {
+  "className": "dsh-au-mask",
+  "onClick": "[fn]"
+ },
+ "c": {
+  "t": "div",
+  "p": {
+   "aria-modal": "true",
+   "className": "dsh-au-wb-modal",
+   "role": "dialog"
+  },
+  "c": [
+   {
+    "t": "header",
+    "p": {
+     "className": "dsh-au-wb-head"
+    },
+    "c": [
+     {
+      "t": "input",
+      "p": {
+       "autoFocus": false,
+       "className": "dsh-au-wb-search",
+       "onChange": "[fn]",
+       "placeholder": "输入菜单序号、服务名或关键字检索...",
+       "value": ""
+      },
+      "c": null
+     },
+     {
+      "t": "div",
+      "p": {
+       "style": {
+        "display": "flex",
+        "alignItems": "center",
+        "gap": "8px"
+       }
+      },
+      "c": [
+       {
+        "t": "button",
+        "p": {
+         "className": "dsh-au-wb-pill on",
+         "onClick": "[fn]",
+         "title": "自动识别当前系统；点击可切换预览 Windows / macOS 专属菜单项",
+         "type": "button"
+        },
+        "c": "系统识别: macOS (.sh)"
+       },
+       {
+        "t": "button",
+        "p": {
+         "className": "dsh-au-btn",
+         "disabled": false,
+         "onClick": "[fn]",
+         "title": "立即重新检查后台服务运行状态（默认 1 小时自动缓存）",
+         "type": "button"
+        },
+        "c": "刷新"
+       },
+       {
+        "t": "button",
+        "p": {
+         "className": "dsh-au-btn",
+         "onClick": "[fn]",
+         "type": "button"
+        },
+        "c": "关闭 (Esc)"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "t": "div",
+    "p": {
+     "className": "dsh-au-wb-body"
+    },
+    "c": [
+     {
+      "t": "nav",
+      "p": {
+       "className": "dsh-au-wb-nav"
+      },
+      "c": [
+       {
+        "t": "button",
+        "p": {
+         "className": "dsh-au-wb-navbtn ",
+         "key": "nav-fav",
+         "onClick": "[fn]",
+         "type": "button"
+        },
+        "c": [
+         {
+          "t": "span",
+          "p": {
+           "className": "dsh-au-nav-main"
+          },
+          "c": [
+           {
+            "t": "span",
+            "p": {
+             "className": "dsh-au-nav-icon",
+             "key": "icon"
+            },
+            "c": {
+             "t": "StarIcon",
+             "p": {},
+             "c": null
+            }
+           },
+           {
+            "t": "span",
+            "p": {
+             "className": "dsh-au-nav-label",
+             "key": "label"
+            },
+            "c": "常用收藏"
+           }
+          ]
+         },
+         {
+          "t": "span",
+          "p": {
+           "className": "dsh-au-nav-count"
+          },
+          "c": "3"
+         }
+        ]
+       },
+       {
+        "t": "button",
+        "p": {
+         "className": "dsh-au-wb-navbtn ",
+         "key": "nav-services",
+         "onClick": "[fn]",
+         "type": "button"
+        },
+        "c": [
+         {
+          "t": "span",
+          "p": {
+           "className": "dsh-au-nav-main"
+          },
+          "c": [
+           {
+            "t": "span",
+            "p": {
+             "className": "dsh-au-nav-icon",
+             "key": "icon"
+            },
+            "c": {
+             "t": "ServicesIcon",
+             "p": {},
+             "c": null
+            }
+           },
+           {
+            "t": "span",
+            "p": {
+             "className": "dsh-au-nav-label",
+             "key": "label"
+            },
+            "c": "后台服务管理"
+           }
+          ]
+         },
+         {
+          "t": "span",
+          "p": {
+           "className": "dsh-au-nav-count"
+          },
+          "c": "2"
+         }
+        ]
+       },
+       {
+        "t": "button",
+        "p": {
+         "className": "dsh-au-wb-navbtn active",
+         "key": "nav-plugins",
+         "onClick": "[fn]",
+         "type": "button"
+        },
+        "c": [
+         {
+          "t": "span",
+          "p": {
+           "className": "dsh-au-nav-main"
+          },
+          "c": [
+           {
+            "t": "span",
+            "p": {
+             "className": "dsh-au-nav-icon",
+             "key": "icon"
+            },
+            "c": {
+             "t": "PluginIcon",
+             "p": {},
+             "c": null
+            }
+           },
+           {
+            "t": "span",
+            "p": {
+             "className": "dsh-au-nav-label",
+             "key": "label"
+            },
+            "c": "插件管理"
+           }
+          ]
+         },
+         {
+          "t": "span",
+          "p": {
+           "className": "dsh-au-nav-count"
+          },
+          "c": "2"
+         }
+        ]
+       },
+       {
+        "t": "button",
+        "p": {
+         "className": "dsh-au-wb-navbtn ",
+         "key": "nav-all",
+         "onClick": "[fn]",
+         "type": "button"
+        },
+        "c": [
+         {
+          "t": "span",
+          "p": {
+           "className": "dsh-au-nav-main"
+          },
+          "c": [
+           {
+            "t": "span",
+            "p": {
+             "className": "dsh-au-nav-icon",
+             "key": "icon"
+            },
+            "c": {
+             "t": "CommandMenuIcon",
+             "p": {},
+             "c": null
+            }
+           },
+           {
+            "t": "span",
+            "p": {
+             "className": "dsh-au-nav-label",
+             "key": "label"
+            },
+            "c": "全部菜单指令"
+           }
+          ]
+         },
+         {
+          "t": "span",
+          "p": {
+           "className": "dsh-au-nav-count"
+          },
+          "c": "6"
+         }
+        ]
+       },
+       {
+        "t": "button",
+        "p": {
+         "className": "dsh-au-wb-navbtn ",
+         "key": "basic",
+         "onClick": "[fn]",
+         "type": "button"
+        },
+        "c": [
+         {
+          "t": "span",
+          "p": {
+           "className": "dsh-au-nav-main"
+          },
+          "c": [
+           {
+            "t": "span",
+            "p": {
+             "className": "dsh-au-nav-icon",
+             "key": "icon"
+            },
+            "c": {
+             "t": "span",
+             "p": {
+              "className": "dsh-au-nav-dot"
+             },
+             "c": null
+            }
+           },
+           {
+            "t": "span",
+            "p": {
+             "className": "dsh-au-nav-label",
+             "key": "label"
+            },
+            "c": "基础"
+           }
+          ]
+         },
+         {
+          "t": "span",
+          "p": {
+           "className": "dsh-au-nav-count"
+          },
+          "c": "4"
+         }
+        ]
+       },
+       {
+        "t": "button",
+        "p": {
+         "className": "dsh-au-wb-navbtn ",
+         "key": "cursor",
+         "onClick": "[fn]",
+         "type": "button"
+        },
+        "c": [
+         {
+          "t": "span",
+          "p": {
+           "className": "dsh-au-nav-main"
+          },
+          "c": [
+           {
+            "t": "span",
+            "p": {
+             "className": "dsh-au-nav-icon",
+             "key": "icon"
+            },
+            "c": {
+             "t": "span",
+             "p": {
+              "className": "dsh-au-nav-dot"
+             },
+             "c": null
+            }
+           },
+           {
+            "t": "span",
+            "p": {
+             "className": "dsh-au-nav-label",
+             "key": "label"
+            },
+            "c": "Cursor"
+           }
+          ]
+         },
+         {
+          "t": "span",
+          "p": {
+           "className": "dsh-au-nav-count"
+          },
+          "c": "2"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "t": "section",
+      "p": {
+       "className": "dsh-au-wb-center"
+      },
+      "c": {
+       "t": "#fragment",
+       "p": {},
+       "c": [
+        {
+         "t": "div",
+         "p": {
+          "key": "tabs",
+          "style": {
+           "display": "flex",
+           "gap": "7px",
+           "paddingBottom": "3px",
+           "borderBottom": "1px solid #1f2637",
+           "alignItems": "center",
+           "justifyContent": "space-between",
+           "flexWrap": "wrap"
+          }
+         },
+         "c": [
+          {
+           "t": "div",
+           "p": {
+            "key": "view-pills",
+            "style": {
+             "display": "flex",
+             "gap": "7px"
+            }
+           },
+           "c": [
+            {
+             "t": "button",
+             "p": {
+              "className": "dsh-au-wb-pill ",
+              "key": "local",
+              "onClick": "[fn]",
+              "type": "button"
+             },
+             "c": "本机插件 2"
+            },
+            {
+             "t": "button",
+             "p": {
+              "className": "dsh-au-wb-pill sel",
+              "key": "cloud",
+              "onClick": "[fn]",
+              "type": "button"
+             },
+             "c": "云插件 2"
+            }
+           ]
+          },
+          {
+           "t": "div",
+           "p": {
+            "key": "batch-actions",
+            "style": {
+             "display": "flex",
+             "gap": "6px",
+             "flexWrap": "wrap"
+            }
+           },
+           "c": [
+            {
+             "t": "button",
+             "p": {
+              "className": "dsh-au-wb-pill",
+              "disabled": false,
+              "key": "plugin-doctor",
+              "onClick": "[fn]",
+              "title": "只检查运行时、实际版本与快照，不安装插件、不修改本机配置",
+              "type": "button"
+             },
+             "c": "只读体检"
+            },
+            {
+             "t": "button",
+             "p": {
+              "className": "dsh-au-wb-pill on",
+              "disabled": false,
+              "key": "restore-preview",
+              "onClick": "[fn]",
+              "title": "对比云端插件清单与本机 DSH Profile 的差异，确认后从云端一键还原到本地",
+              "type": "button"
+             },
+             "c": "一键还原到本地"
+            }
+           ]
+          }
+         ]
+        },
+        {
+         "t": "section",
+         "p": {
+          "className": "dsh-au-quota-shell",
+          "key": "notice"
+         },
+         "c": [
+          {
+           "t": "strong",
+           "p": {
+            "key": "title"
+           },
+           "c": "云插件 · 当前电脑已接入 1/2 项"
+          },
+          {
+           "t": "span",
+           "p": {
+            "key": "text",
+            "style": {
+             "color": "#94a3b8",
+             "fontSize": "15px"
+            }
+           },
+           "c": "选中插件后在详情面板操作；也可点击右上角「一键还原到本地」从云端一键恢复全部云插件与配置。"
+          }
+         ]
+        },
+        {
+         "t": "div",
+         "p": {
+          "className": "dsh-au-wb-grid",
+          "key": "grid"
+         },
+         "c": [
+          {
+           "t": "div",
+           "p": {
+            "className": "dsh-au-wb-card ",
+            "key": "dsh-au",
+            "onClick": "[fn]"
+           },
+           "c": [
+            {
+             "t": "div",
+             "p": {
+              "className": "dsh-au-card-head",
+              "key": "head"
+             },
+             "c": [
+              {
+               "t": "div",
+               "p": {
+                "className": "dsh-au-card-title-row",
+                "key": "title-row"
+               },
+               "c": [
+                {
+                 "t": "span",
+                 "p": {
+                  "className": "dsh-au-card-title",
+                  "key": "title"
+                 },
+                 "c": "DSH AU"
+                },
+                {
+                 "t": "span",
+                 "p": {
+                  "className": "dsh-au-chip dsh-au-chip-own",
+                  "data-tone": "violet",
+                  "key": "own",
+                  "title": "DSH-Au 团队自研插件，非社区插件"
+                 },
+                 "c": "自研"
+                }
+               ]
+              }
+             ]
+            },
+            {
+             "t": "div",
+             "p": {
+              "className": "dsh-au-card-ver",
+              "key": "meta"
+             },
+             "c": "v0.1.0 · dsh-au"
+            },
+            {
+             "t": "div",
+             "p": {
+              "className": "dsh-au-card-desc",
+              "key": "desc"
+             },
+             "c": "多机远程与局域网自发现工作区插件"
+            },
+            {
+             "t": "div",
+             "p": {
+              "className": "dsh-au-card-status",
+              "key": "status"
+             },
+             "c": [
+              {
+               "t": "span",
+               "p": {
+                "className": "dsh-au-chip",
+                "data-tone": "emerald",
+                "key": "启用中-0"
+               },
+               "c": "启用中"
+              },
+              {
+               "t": "span",
+               "p": {
+                "className": "dsh-au-chip",
+                "data-tone": "blue",
+                "key": "已接入云同步-1"
+               },
+               "c": "已接入云同步"
+              }
+             ]
+            }
+           ]
+          },
+          {
+           "t": "div",
+           "p": {
+            "className": "dsh-au-wb-card selected",
+            "key": "dsh-acp-adapter",
+            "onClick": "[fn]"
+           },
+           "c": [
+            {
+             "t": "div",
+             "p": {
+              "className": "dsh-au-card-head",
+              "key": "head"
+             },
+             "c": [
+              {
+               "t": "div",
+               "p": {
+                "className": "dsh-au-card-title-row",
+                "key": "title-row"
+               },
+               "c": [
+                {
+                 "t": "span",
+                 "p": {
+                  "className": "dsh-au-card-title",
+                  "key": "title"
+                 },
+                 "c": "Cursor ACP"
+                }
+               ]
+              }
+             ]
+            },
+            {
+             "t": "div",
+             "p": {
+              "className": "dsh-au-card-ver",
+              "key": "meta"
+             },
+             "c": "v1.0.0 · dsh-acp-adapter"
+            },
+            {
+             "t": "div",
+             "p": {
+              "className": "dsh-au-card-status",
+              "key": "status"
+             },
+             "c": [
+              {
+               "t": "span",
+               "p": {
+                "className": "dsh-au-chip",
+                "data-tone": "muted",
+                "key": "未安装-0"
+               },
+               "c": "未安装"
+              },
+              {
+               "t": "span",
+               "p": {
+                "className": "dsh-au-chip",
+                "data-tone": "blue",
+                "key": "云插件-1"
+               },
+               "c": "云插件"
+              }
+             ]
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "t": "aside",
+      "p": {
+       "className": "dsh-au-wb-inspector"
+      },
+      "c": {
+       "t": "#fragment",
+       "p": {},
+       "c": [
+        {
+         "t": "div",
+         "p": {
+          "className": "dsh-au-insp-head",
+          "key": "head"
+         },
+         "c": [
+          {
+           "t": "span",
+           "p": {
+            "className": "dsh-au-insp-name",
+            "key": "name",
+            "title": "Cursor ACP"
+           },
+           "c": "Cursor ACP"
+          }
+         ]
+        },
+        {
+         "t": "div",
+         "p": {
+          "className": "dsh-au-insp-id",
+          "key": "meta"
+         },
+         "c": "v1.0.0 · dsh-acp-adapter"
+        },
+        {
+         "t": "div",
+         "p": {
+          "className": "dsh-au-chips",
+          "key": "status"
+         },
+         "c": [
+          {
+           "t": "span",
+           "p": {
+            "className": "dsh-au-chip",
+            "data-tone": "muted",
+            "key": "未安装-0"
+           },
+           "c": "未安装"
+          },
+          {
+           "t": "span",
+           "p": {
+            "className": "dsh-au-chip",
+            "data-tone": "blue",
+            "key": "云插件-1"
+           },
+           "c": "云插件"
+          }
+         ]
+        },
+        {
+         "t": "div",
+         "p": {
+          "className": "dsh-au-act-block",
+          "key": "action"
+         },
+         "c": [
+          {
+           "t": "button",
+           "p": {
+            "className": "dsh-au-btn on",
+            "disabled": false,
+            "onClick": "[fn]",
+            "type": "button"
+           },
+           "c": "接入本机"
+          },
+          {
+           "t": "div",
+           "p": {
+            "className": "dsh-au-act-hint"
+           },
+           "c": "安装并启用 · 重启 DSH 后生效"
+          }
+         ]
+        },
+        {
+         "t": "div",
+         "p": {
+          "className": "dsh-au-act-block",
+          "key": "remove"
+         },
+         "c": [
+          {
+           "t": "button",
+           "p": {
+            "className": "dsh-au-link",
+            "data-tone": "danger",
+            "disabled": false,
+            "onClick": "[fn]",
+            "type": "button"
+           },
+           "c": "从云清单移除"
+          },
+          {
+           "t": "div",
+           "p": {
+            "className": "dsh-au-act-hint"
+           },
+           "c": "所有电脑都看不到 · 不影响本机"
+          }
+         ]
+        },
+        {
+         "t": "div",
+         "p": {
+          "className": "dsh-au-note",
+          "key": "note"
+         },
+         "c": "同步完成"
+        }
+       ]
+      }
+     }
+    ]
+   },
+   {
+    "t": "footer",
+    "p": {
+     "className": "dsh-au-wb-foot"
+    },
+    "c": [
+     {
+      "t": "span",
+      "p": {},
+      "c": "支持序号直达 (11-71) · 双击无参卡片直接执行 · 后台服务独立于 DSH 运行，支持按电脑保存自启组合"
+     },
+     {
+      "t": "span",
+      "p": {},
+      "c": "本机: TestBook · SSOT: scripts/menu.json"
+     }
+    ]
+   }
+  ]
+ }
+}

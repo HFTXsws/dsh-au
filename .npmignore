@@ -1,0 +1,14 @@
+sync/local/
+sync/machines/*
+!sync/machines/.gitkeep
+sync/plugins/*
+!sync/plugins/.gitkeep
+sync/extensions/
+docs/
+tests/
+graphify-out/
+.idea/
+*.log
+*.tmp
+.DS_Store
+Thumbs.db

@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "groups": [
+    {
+      "title": "Skill 管理",
+      "items": [
+        {
+          "code": "11",
+          "label": "同步最新 Skill",
+          "description": "同步当前仓库的 Skill、链接与规则。",
+          "script": "init",
+          "runner": "platform",
+          "confirm": false
+        }
+      ]
+    },
+    {
+      "title": "规则与配置",
+      "items": [
+        {
+          "code": "21",
+          "label": "同步 IDE 配置",
+          "description": "在本机与项目之间同步 IDE 配置。",
+          "script": "sync-ide-config",
+          "runner": "platform",
+          "confirm": true,
+          "preview": true,
+          "params": [
+            {
+              "name": "action",
+              "label": "动作",
+              "type": "select",
+              "options": [
+                { "value": "import", "label": "上传" },
+                { "value": "export", "label": "同步" },
+                { "value": "scan", "label": "扫描" }
+              ],
+              "defaultValue": "scan",
+              "winFlag": "-Action",
+              "posixFlag": ""
+            },
+            {
+              "name": "yes",
+              "label": "免确认",
+              "type": "boolean",
+              "defaultValue": true,
+              "winFlag": "-Yes",
+              "posixFlag": "--yes"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "DSH 配置",
+      "items": [
+        {
+          "code": "71",
+          "label": "还原 DSH 模型配置",
+          "description": "把仓库快照写回本机 DSH。",
+          "script": "dsh-restore.mjs",
+          "runner": "node",
+          "confirm": true,
+          "params": [
+            {
+              "name": "dshProfile",
+              "label": "DSH 方案",
+              "type": "select",
+              "options": [
+                { "value": "kiro", "label": "profile kiro" },
+                { "value": "local", "label": "profile local", "platform": "darwin" }
+              ],
+              "defaultValue": "kiro",
+              "winFlag": "--profile",
+              "posixFlag": "--profile"
+            },
+            {
+              "name": "installPlugin",
+              "label": "安装插件",
+              "type": "boolean",
+              "defaultValue": true,
+              "platform": "win32",
+              "winFlag": "--install-plugin",
+              "posixFlag": "--install-plugin"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

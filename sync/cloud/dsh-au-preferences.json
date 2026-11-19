@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "todo": true,
+  "fullAccessByDefault": false,
+  "blockGoalCreation": false,
+  "windowRestoreEnabled": true,
+  "mobileEnabled": true,
+  "autoContinue": {
+    "enabled": true,
+    "retryDelaySec": 60,
+    "maxRetries": 5,
+    "compactOnDisconnect": true,
+    "continueOnTruncate": true,
+    "prompt": "继续",
+    "rules": []
+  },
+  "shortcutOverrides": {}
+}
