@@ -137,3 +137,28 @@ test('宿主新会话创建时，若 fullAccessByDefault 开启且存在 permiss
   assert.equal(appliedSession, session);
   assert.equal(appliedPreset, 'danger-full-access');
 });
+
+test('受控页同步默认权限：声明 remote 注入；宿主未提供时不抛错，提供时写入 defaultPreset', async () => {
+  const code = readFileSync(new URL('../client/client.js', import.meta.url), 'utf8');
+  const start = code.indexOf('    async function syncControlledHostDefaultPreset(');
+  const end = code.indexOf('    async function ensureControlledSessionFullAccess(');
+  assert.ok(start > 0 && end > start, '找不到 syncControlledHostDefaultPreset');
+  const sync = new Function(`${code.slice(start, end)}\nreturn syncControlledHostDefaultPreset;`)();
+
+  // 宿主 ctx 是 Proxy：读取未注入的属性（包括 ctx.get('remote')）都会抛错。
+  const missing = (name) => { throw new Error(`cannot get property "${name}" without inject`); };
+  const bareCtx = new Proxy({ get: missing }, { get: (target, key) => (key in target ? target[key] : missing(key)) });
+  await assert.doesNotReject(() => sync(true, bareCtx));
+
+  const calls = [];
+  const settings = { mutate: async (ns, ops) => { calls.push([ns, ops]); } };
+  await sync(true, { remote: { settings } });
+  await sync(false, { get: (name) => (name === 'remote' ? { settings } : undefined) });
+  assert.deepEqual(calls, [
+    ['permission', [{ op: 'set', path: ['defaultPreset'], value: 'danger-full-access' }]],
+    ['permission', [{ op: 'set', path: ['defaultPreset'], value: 'workspace-write' }]],
+  ]);
+
+  // 插件必须声明 remote 与 remote.settings，宿主才会把服务注入 ctx。
+  assert.match(code, /const inject = \[[^\]]*'remote', 'remote\.settings'\]/);
+});

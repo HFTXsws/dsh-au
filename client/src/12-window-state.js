@@ -1,7 +1,8 @@
     // layout 提供本机主面板切换；shortcuts 防止浏览器级监听被宿主提前消费。
     // layout 提供本机主面板切换；shortcuts 防止浏览器级监听被宿主提前消费；
-    // uiWorkspace / sessions 供内置待办面板跳转和读取当前会话。
-    const inject = ['slots', 'layout', 'shortcuts', 'uiWorkspace', 'sessions'];
+    // uiWorkspace / sessions 供内置待办面板跳转和读取当前会话；
+    // remote / remote.settings 供受控远端页同步「默认完全权限」，未声明时宿主读取 ctx.remote 会直接抛错。
+    const inject = ['slots', 'layout', 'shortcuts', 'uiWorkspace', 'sessions', 'remote', 'remote.settings'];
 
     // ===== 窗口位置记忆 =====
     // DSH 桌面端的 Electron 窗口允许渲染进程用 moveTo/resizeTo 直接改位置与大小，

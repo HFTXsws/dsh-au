@@ -114,7 +114,7 @@ test('client mounts a root-resident top bar and preserves remote iframe instance
   assert.match(client, /if \(!preserveTopbar\) setTopbarCollapsed\(false\)/);
   assert.match(client, /function dispatchDeviceSwitch\(direction, preserveTopbar = true\)/);
   // 由 DSH 快捷键服务处理浏览器事件，并通过内部事件统一本地与 iframe 内的切换。
-  assert.match(client, /const inject = \['slots', 'layout', 'shortcuts', 'uiWorkspace', 'sessions'\]/);
+  assert.match(client, /const inject = \['slots', 'layout', 'shortcuts', 'uiWorkspace', 'sessions', 'remote', 'remote\.settings'\]/);
   assert.match(client, /ctx\.shortcuts\.register\(\{/);
   assert.match(client, /'dsh-au\.device\.previous'/);
   assert.match(client, /'dsh-au\.device\.next'/);

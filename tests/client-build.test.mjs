@@ -55,7 +55,8 @@ test('拼接后的 bundle 能被 ModuleLoader 真实加载并导出 name/inject/
   });
   // 片段被拼接进同一个 factory 作用域，顶层缺引用会在这里直接抛错。
   assert.equal(mod.name, 'dsh-au');
-  assert.deepEqual(mod.inject, ['slots', 'layout', 'shortcuts', 'uiWorkspace', 'sessions']);
+  // remote / remote.settings 必须声明，否则受控页同步默认权限时宿主抛 “without inject”。
+  assert.deepEqual(mod.inject, ['slots', 'layout', 'shortcuts', 'uiWorkspace', 'sessions', 'remote', 'remote.settings']);
   assert.equal(typeof mod.apply, 'function');
   assert.equal(typeof mod.mobile.isMobileViewport, 'function');
 });
