@@ -3986,7 +3986,9 @@
           };
         }, []);
 
-        if (!mountNode || typeof ReactDOM.createPortal !== 'function') return null;
+        // 远程 DSH 管理关闭时，侧栏不再展示远程设备工作区。
+        const remoteManagementEnabled = useFeatures().remoteManagement !== false;
+        if (!remoteManagementEnabled || !mountNode || typeof ReactDOM.createPortal !== 'function') return null;
         return ReactDOM.createPortal(h(RemoteWorkspacesTree), mountNode);
       }
 

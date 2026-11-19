@@ -107,6 +107,8 @@
         };
         const sync = () => {
           clear();
+          // 快捷键总开关关闭时不向 DSH 注册表交出任何键位。
+          if (!shortcutStore.enabled) return;
           disposers.push(
             register('device.previous', 'dsh-au.device.previous', '切换到左侧设备', 'BracketLeft', -1),
             register('device.next', 'dsh-au.device.next', '切换到右侧设备', 'BracketRight', 1),

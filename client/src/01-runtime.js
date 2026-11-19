@@ -792,6 +792,8 @@
         }
         if (event.source === window.parent && data?.source === 'dsh-au' && data?.type === SHORTCUT_CONFIG_MESSAGE) {
           setShortcutOverrides(normalizeShortcutOverrides(data.overrides), { persist: false });
+          // 总开关跟随外层；旧版外层不带该字段时按关闭处理。
+          setShortcutsEnabled(data.shortcutsEnabled === true, { persist: false });
           if (typeof data.fullAccessByDefault === 'boolean') {
             controlledFullAccessByDefault = data.fullAccessByDefault;
             void syncControlledHostDefaultPreset(controlledFullAccessByDefault);
@@ -1074,10 +1076,12 @@
     }
 
     const MOBILE_FEATURE_STORAGE_KEY = 'dsh-au.mobile-enabled';
+    // 设置页「管理远程设备」按钮通过该事件请求外壳打开远程设备管理弹窗。
+    const OPEN_REMOTE_MANAGER_EVENT = 'dsh-au:open-remote-manager';
 
-    /** 移动端抽屉的开关只存在当前浏览器；没有记录或读取失败都视为开启。 */
+    /** 移动端优化的开关只存在当前浏览器；默认关闭，只有明确记录为开启才生效。 */
     function readMobileFeatureEnabled() {
-      try { return localStorage.getItem(MOBILE_FEATURE_STORAGE_KEY) !== 'false'; } catch { return true; }
+      try { return localStorage.getItem(MOBILE_FEATURE_STORAGE_KEY) === 'true'; } catch { return false; }
     }
 
     function writeMobileFeatureEnabled(enabled) {

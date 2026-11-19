@@ -104,6 +104,7 @@
     /** 设置页外层清爽入口：单行展示 + 「配置快捷键」按钮打开独立弹窗（内部复用 ShortcutSettingsGroup）。 */
     function ShortcutSettingsSection() {
       const overrides = useShortcutOverrides();
+      const shortcutsEnabled = useShortcutsEnabled();
       const [modalOpen, setModalOpen] = useState(false);
       const titleId = 'dsh-au-shortcuts-section-title';
       const customCount = Object.keys(overrides).length;
@@ -111,7 +112,9 @@
         const binding = effectiveShortcutBinding(action.id, overrides);
         return `${action.label}：${describeShortcutBinding(binding)}`;
       });
-      const hintText = `共 ${SHORTCUT_ACTIONS.length} 项快捷键（已自定义 ${customCount} 项）· ${summaryItems.join(' · ')} · 设置保存在当前浏览器`;
+      const hintText = shortcutsEnabled
+        ? `共 ${SHORTCUT_ACTIONS.length} 项快捷键（已自定义 ${customCount} 项）· ${summaryItems.join(' · ')} · 设置保存在当前浏览器`
+        : '已关闭：以下快捷键全部不响应，打开开关后立即生效。设置保存在当前浏览器。';
 
       useEffect(() => {
         if (!modalOpen) return undefined;
@@ -142,6 +145,19 @@
           title: '全局与远程页面快捷键',
           description: '自定义工作台、新建会话与设备切换等组合键；设置只保存在当前浏览器，焦点在远端设备页面里时同样生效。',
           hint: hintText,
+          // 总开关：默认关闭，关闭时本机与远程页面的快捷键都不生效（模型快捷切换由其自身开关控制）。
+          control: h(
+            'button',
+            {
+              type: 'button',
+              role: 'switch',
+              className: 'dsh-au-switch',
+              'aria-checked': shortcutsEnabled,
+              'aria-labelledby': titleId,
+              onClick: () => setShortcutsEnabled(!shortcutsEnabled),
+            },
+            h('span', { className: 'dsh-au-switch-knob', 'aria-hidden': 'true' })
+          ),
           actions: h(
             'button',
             {

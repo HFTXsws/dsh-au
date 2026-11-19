@@ -1,12 +1,13 @@
 {
   "schemaVersion": 1,
   "todo": true,
+  "remoteManagement": true,
   "fullAccessByDefault": false,
   "blockGoalCreation": false,
-  "windowRestoreEnabled": true,
-  "mobileEnabled": true,
+  "windowRestoreEnabled": false,
+  "mobileEnabled": false,
   "autoContinue": {
-    "enabled": true,
+    "enabled": false,
     "retryDelaySec": 60,
     "maxRetries": 5,
     "compactOnDisconnect": true,

@@ -46,7 +46,8 @@ test('merged client exposes mobile helpers and gates the drawer on a per-browser
   const previous = globalThis.localStorage;
   globalThis.localStorage = { getItem: (key) => (store.has(key) ? store.get(key) : null), setItem: (key, value) => { store.set(key, String(value)); } };
   try {
-    assert.equal(mod.readMobileFeatureEnabled(), true);
+    // 没有记录时默认关闭移动端优化。
+    assert.equal(mod.readMobileFeatureEnabled(), false);
     mod.writeMobileFeatureEnabled(false);
     assert.equal(store.get('dsh-au.mobile-enabled'), 'false');
     assert.equal(mod.readMobileFeatureEnabled(), false);

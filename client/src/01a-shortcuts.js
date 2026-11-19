@@ -1,6 +1,8 @@
     // ===== 快捷键：动作表、绑定匹配、浏览器本地覆盖 =====
     // 覆盖项只存在当前浏览器（localStorage）；受控 iframe 读不到外层的存储，由外层经 postMessage 推送。
     const SHORTCUT_STORAGE_KEY = 'dsh-au.shortcuts';
+    // 快捷键总开关：默认关闭，只存当前浏览器；关闭时所有 dsh-au 快捷键（含远程页面转发）都不响应。
+    const SHORTCUTS_ENABLED_STORAGE_KEY = 'dsh-au.shortcuts-enabled';
     const SHORTCUT_CONFIG_MESSAGE = 'shortcut-config';
     const SHORTCUT_ACTION_MESSAGE = 'shortcut-action';
     const TODO_TOGGLE_EVENT = 'dsh-au:toggle-todo';
@@ -72,6 +74,15 @@
       }
     }
 
+    /** 只有明确记录为开启才启用快捷键；没有记录或读取失败都视为关闭。 */
+    function readShortcutsEnabled() {
+      try { return localStorage.getItem(SHORTCUTS_ENABLED_STORAGE_KEY) === 'true'; } catch { return false; }
+    }
+
+    function writeShortcutsEnabled(enabled) {
+      try { localStorage.setItem(SHORTCUTS_ENABLED_STORAGE_KEY, enabled ? 'true' : 'false'); } catch {}
+    }
+
     function writeShortcutOverrides(overrides) {
       try {
         if (Object.keys(overrides).length) localStorage.setItem(SHORTCUT_STORAGE_KEY, JSON.stringify(overrides));
@@ -99,7 +110,8 @@
 
     /** 命中哪个动作；录入新快捷键期间一律不触发，避免边录边执行。 */
     function findShortcutAction(event, overrides = shortcutStore.overrides) {
-      if (shortcutStore.recording) return null;
+      // 总开关关闭时一律不命中，本机与远程页面的快捷键都不生效。
+      if (shortcutStore.recording || !shortcutStore.enabled) return null;
       for (const action of SHORTCUT_ACTIONS) {
         if (matchesShortcutBinding(event, effectiveShortcutBinding(action.id, overrides))) return action.id;
       }
@@ -156,9 +168,30 @@
 
     const shortcutStore = {
       overrides: {},
+      enabled: false,
       listeners: new Set(),
       recording: false,
     };
+
+    /** 切换总开关并通知订阅方（设置页、DSH 注册表同步、受控 iframe 推送）。 */
+    function setShortcutsEnabled(next, { persist = true } = {}) {
+      const enabled = next === true;
+      if (persist) writeShortcutsEnabled(enabled);
+      if (shortcutStore.enabled === enabled) return;
+      shortcutStore.enabled = enabled;
+      for (const listener of [...shortcutStore.listeners]) listener(shortcutStore.overrides);
+    }
+
+    function useShortcutsEnabled() {
+      const [enabled, setEnabled] = useState(shortcutStore.enabled);
+      useEffect(() => {
+        const listener = () => setEnabled(shortcutStore.enabled);
+        shortcutStore.listeners.add(listener);
+        listener();
+        return () => { shortcutStore.listeners.delete(listener); };
+      }, []);
+      return enabled;
+    }
 
     function setShortcutOverrides(next, { persist = true } = {}) {
       shortcutStore.overrides = next;
@@ -191,12 +224,16 @@
     /** 外层页读本地存储并监听其他标签页的修改；受控 iframe 一律等外层推送，绝不读自己的存储。 */
     function initShortcutStore() {
       if (isControlledFrame()) {
+        // 受控 iframe 先保持关闭，等外层推送总开关与覆盖表。
+        setShortcutsEnabled(false, { persist: false });
         setShortcutOverrides({}, { persist: false });
         return () => {};
       }
+      setShortcutsEnabled(readShortcutsEnabled(), { persist: false });
       setShortcutOverrides(readShortcutOverrides(), { persist: false });
       const onStorage = (event) => {
         if (event.key === SHORTCUT_STORAGE_KEY) setShortcutOverrides(readShortcutOverrides(), { persist: false });
+        if (event.key === SHORTCUTS_ENABLED_STORAGE_KEY) setShortcutsEnabled(readShortcutsEnabled(), { persist: false });
       };
       window.addEventListener('storage', onStorage);
       return () => window.removeEventListener('storage', onStorage);
@@ -209,6 +246,7 @@
           ? Boolean(featuresStore?.snapshot?.fullAccessByDefault)
           : false;
         frameWindow?.postMessage({ source: 'dsh-au', type: SHORTCUT_CONFIG_MESSAGE, overrides: shortcutStore.overrides,
+          shortcutsEnabled: shortcutStore.enabled,
           modelShortcuts: { enabled, binding, loaded },
           modelShortcutOpen: modelShortcutPopup.snapshot.open && modelShortcutTarget.frame?.contentWindow === frameWindow,
           modelShortcutGeneration,
@@ -229,6 +267,8 @@
       describeShortcutBinding,
       normalizeShortcutOverrides,
       setShortcutOverrides,
+      setShortcutsEnabled,
+      readShortcutsEnabled,
       shortcutDeviceDirection,
       installControlledFrameShortcutBridge,
       postShortcutConfig,

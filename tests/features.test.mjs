@@ -37,8 +37,13 @@ test('功能开关：todo 默认开启，权限与目标创建限制只有显式
   ];
   assert.deepEqual(normalizeFeatures(undefined), DEFAULT_FEATURES);
   for (const [raw, expected] of cases) {
-    assert.deepEqual(normalizeFeatures(raw), { disconnectRemotesOnLock: false, ...expected });
+    // 远程 DSH 管理缺字段时保持开启。
+    assert.deepEqual(normalizeFeatures(raw), { remoteManagement: true, disconnectRemotesOnLock: false, ...expected });
   }
+  for (const remoteManagement of [undefined, null, 'false', 0, true]) {
+    assert.equal(normalizeFeatures({ remoteManagement }).remoteManagement, true);
+  }
+  assert.equal(normalizeFeatures({ remoteManagement: false }).remoteManagement, false);
 });
 
 test('配置读写往返保留全部宿主功能开关，旧配置缺目标限制字段时不改变原行为', () => {
@@ -46,23 +51,23 @@ test('配置读写往返保留全部宿主功能开关，旧配置缺目标限�
   const previousHome = process.env.DSH_HOME;
   process.env.DSH_HOME = dir;
   try {
-    assert.deepEqual(loadConfig().features, { todo: true, fullAccessByDefault: false, blockGoalCreation: false, disconnectRemotesOnLock: false });
+    assert.deepEqual(loadConfig().features, { todo: true, remoteManagement: true, fullAccessByDefault: false, blockGoalCreation: false, disconnectRemotesOnLock: false });
     const cfg = loadConfig();
-    cfg.features = normalizeFeatures({ todo: false, fullAccessByDefault: true, blockGoalCreation: true, disconnectRemotesOnLock: true });
+    cfg.features = normalizeFeatures({ todo: false, remoteManagement: true, fullAccessByDefault: true, blockGoalCreation: true, disconnectRemotesOnLock: true });
     saveConfig(cfg);
-    assert.deepEqual(loadConfig().features, { todo: false, fullAccessByDefault: true, blockGoalCreation: true, disconnectRemotesOnLock: true });
+    assert.deepEqual(loadConfig().features, { todo: false, remoteManagement: true, fullAccessByDefault: true, blockGoalCreation: true, disconnectRemotesOnLock: true });
 
     const filePath = join(dir, 'dsh-au.config.json');
     const raw = JSON.parse(readFileSync(filePath, 'utf8'));
     delete raw.features.blockGoalCreation;
     writeFileSync(filePath, JSON.stringify(raw), 'utf8');
-    assert.deepEqual(loadConfig().features, { todo: false, fullAccessByDefault: true, blockGoalCreation: false, disconnectRemotesOnLock: true });
+    assert.deepEqual(loadConfig().features, { todo: false, remoteManagement: true, fullAccessByDefault: true, blockGoalCreation: false, disconnectRemotesOnLock: true });
     delete raw.features.disconnectRemotesOnLock;
     writeFileSync(filePath, JSON.stringify(raw), 'utf8');
-    assert.deepEqual(loadConfig().features, { todo: false, fullAccessByDefault: true, blockGoalCreation: false, disconnectRemotesOnLock: false });
+    assert.deepEqual(loadConfig().features, { todo: false, remoteManagement: true, fullAccessByDefault: true, blockGoalCreation: false, disconnectRemotesOnLock: false });
     delete raw.features;
     writeFileSync(filePath, JSON.stringify(raw), 'utf8');
-    assert.deepEqual(loadConfig().features, { todo: true, fullAccessByDefault: false, blockGoalCreation: false, disconnectRemotesOnLock: false });
+    assert.deepEqual(loadConfig().features, { todo: true, remoteManagement: true, fullAccessByDefault: false, blockGoalCreation: false, disconnectRemotesOnLock: false });
   } finally {
     rmSync(dir, { recursive: true, force: true });
     if (previousHome === undefined) delete process.env.DSH_HOME;
@@ -79,7 +84,7 @@ test('设置源码提供四个功能开关，目标创建限制与完全权限�
   assert.match(client, /callApi\('saveFeatures', \{ blockGoalCreation: Boolean\(next\) \}\)/);
   assert.match(client, /title: '启用待办面板'/);
   assert.match(client, /title: '新开对话默认完全权限'/);
-  assert.match(client, /title: '启用移动端抽屉'/);
+  assert.match(client, /title: '启用移动端优化'/);
   assert.match(client, /writeMobileFeatureEnabled\(next\)/);
   assert.match(client, /callApi\('saveFeatures', \{ disconnectRemotesOnLock: Boolean\(next\) \}\)/);
   assert.match(client, /title: '锁屏时断开远程 DSH'/);

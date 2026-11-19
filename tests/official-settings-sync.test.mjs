@@ -796,3 +796,31 @@ test('pushLocalOfficialSettingsToRepo：跳过含明文凭据的 patch 块，允
   assert.doesNotMatch(kiroPatch, /sk-plaintext-secret-12345/);
   assert.match(kiroPatch, /apiKey: \$\{OPENAI_API_KEY\}/);
 });
+
+test('新电脑首次同步时模型槽位保持空白，不借用其他设备的模型配置', (t) => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'dsh-au-model-no-borrow-'));
+  const keys = ['DSH_AU_MACHINES_DIR', 'DSH_AU_MODEL_SHORTCUTS_PATH', 'DSH_AU_CONFIG_PATH'];
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  const machinesDir = path.join(dir, 'machines');
+  const modelShortcutsPath = path.join(dir, 'home', 'model-shortcuts.json');
+  process.env.DSH_AU_MACHINES_DIR = machinesDir;
+  process.env.DSH_AU_MODEL_SHORTCUTS_PATH = modelShortcutsPath;
+  process.env.DSH_AU_CONFIG_PATH = path.join(dir, 'home', 'dsh-au.config.json');
+  t.after(() => {
+    for (const key of keys) {
+      if (previous[key] === undefined) delete process.env[key];
+      else process.env[key] = previous[key];
+    }
+    rmSync(dir, { recursive: true, force: true });
+  });
+  // 另一台电脑的备份里配置了模型槽位。
+  mkdirSync(machinesDir, { recursive: true });
+  writeFileSync(path.join(machinesDir, 'other-machine.json'), JSON.stringify({
+    updatedAt: new Date().toISOString(),
+    modelShortcuts: { enabled: true, binding: null, slots: [{ provider: 'azure-full', model: 'borrowed' }] },
+  }));
+
+  const result = syncOfficialDshAuPreferences({ repoRoot: dir, dshHome: path.join(dir, 'home'), preferences: ['modelShortcuts'] });
+  assert.equal(result.preferenceMigration?.modelShortcutsFrom, undefined);
+  assert.equal(existsSync(modelShortcutsPath), false, '本机不应写入借来的模型槽位');
+});

@@ -22,6 +22,8 @@ function loadShortcuts(fakeWindow = {}) {
     throw new Error(`未预期的 require：${id}`);
   });
   mod.shortcuts.setShortcutOverrides({}, { persist: false });
+  // 匹配类用例默认在总开关打开的前提下验证键位；总开关本身单独测试。
+  mod.shortcuts.setShortcutsEnabled(true, { persist: false });
   return { api: mod.shortcuts, code };
 }
 
@@ -187,8 +189,8 @@ test('受控 iframe 桥：按生效键位转发，收到外层推送后立即换
   assert.equal(press('Digit9', { alt: true }), false, '菜单快捷键不转发，也不吞掉按键');
   assert.equal(posted.length, 0);
 
-  const push = (source, overrides) => {
-    const event = { source, data: { source: 'dsh-au', type: 'shortcut-config', overrides } };
+  const push = (source, overrides, shortcutsEnabled = true) => {
+    const event = { source, data: { source: 'dsh-au', type: 'shortcut-config', overrides, shortcutsEnabled } };
     for (const listener of listeners.get('message') || []) listener(event);
   };
   push({ id: 'stranger' }, { 'device.next': { code: 'KeyZ', alt: true } });
@@ -198,8 +200,31 @@ test('受控 iframe 桥：按生效键位转发，收到外层推送后立即换
   assert.equal(press('BracketRight', { alt: true }), false);
   assert.equal(press('KeyZ', { alt: true }), true);
   assert.deepEqual(posted.pop(), { source: 'dsh-au', type: 'switch-device', direction: 1, preserveTopbar: true });
+  // 外层关闭总开关后，远程页面里的快捷键也不再转发。
+  push(parent, {}, false);
+  assert.equal(press('BracketRight', { alt: true }), false);
+  assert.equal(posted.length, 0);
   dispose();
   assert.equal(listeners.has('keydown'), false);
+});
+
+test('快捷键总开关默认关闭：关闭时任何键位都不命中，打开后恢复', () => {
+  const store = new Map();
+  const previous = globalThis.localStorage;
+  globalThis.localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => { store.set(k, String(v)); } };
+  try {
+    const { api } = loadShortcuts();
+    assert.equal(api.readShortcutsEnabled(), false, '没有记录时默认关闭');
+    api.setShortcutsEnabled(false);
+    assert.equal(store.get('dsh-au.shortcuts-enabled'), 'false');
+    assert.equal(api.findShortcutAction(key('BracketLeft', { alt: true })), null);
+    assert.equal(api.findShortcutAction(key('F5')), null);
+    api.setShortcutsEnabled(true);
+    assert.equal(api.readShortcutsEnabled(), true);
+    assert.equal(api.findShortcutAction(key('BracketLeft', { alt: true })), 'device.previous');
+  } finally {
+    if (previous === undefined) delete globalThis.localStorage; else globalThis.localStorage = previous;
+  }
 });
 
 test('设置页与外壳接入快捷键管理的关键源码', () => {

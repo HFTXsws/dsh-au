@@ -798,6 +798,8 @@ window.__ModuleLoader__.load({
         }
         if (event.source === window.parent && data?.source === 'dsh-au' && data?.type === SHORTCUT_CONFIG_MESSAGE) {
           setShortcutOverrides(normalizeShortcutOverrides(data.overrides), { persist: false });
+          // 总开关跟随外层；旧版外层不带该字段时按关闭处理。
+          setShortcutsEnabled(data.shortcutsEnabled === true, { persist: false });
           if (typeof data.fullAccessByDefault === 'boolean') {
             controlledFullAccessByDefault = data.fullAccessByDefault;
             void syncControlledHostDefaultPreset(controlledFullAccessByDefault);
@@ -1080,10 +1082,12 @@ window.__ModuleLoader__.load({
     }
 
     const MOBILE_FEATURE_STORAGE_KEY = 'dsh-au.mobile-enabled';
+    // 设置页「管理远程设备」按钮通过该事件请求外壳打开远程设备管理弹窗。
+    const OPEN_REMOTE_MANAGER_EVENT = 'dsh-au:open-remote-manager';
 
-    /** 移动端抽屉的开关只存在当前浏览器；没有记录或读取失败都视为开启。 */
+    /** 移动端优化的开关只存在当前浏览器；默认关闭，只有明确记录为开启才生效。 */
     function readMobileFeatureEnabled() {
-      try { return localStorage.getItem(MOBILE_FEATURE_STORAGE_KEY) !== 'false'; } catch { return true; }
+      try { return localStorage.getItem(MOBILE_FEATURE_STORAGE_KEY) === 'true'; } catch { return false; }
     }
 
     function writeMobileFeatureEnabled(enabled) {
@@ -1114,6 +1118,8 @@ window.__ModuleLoader__.load({
     // ===== 快捷键：动作表、绑定匹配、浏览器本地覆盖 =====
     // 覆盖项只存在当前浏览器（localStorage）；受控 iframe 读不到外层的存储，由外层经 postMessage 推送。
     const SHORTCUT_STORAGE_KEY = 'dsh-au.shortcuts';
+    // 快捷键总开关：默认关闭，只存当前浏览器；关闭时所有 dsh-au 快捷键（含远程页面转发）都不响应。
+    const SHORTCUTS_ENABLED_STORAGE_KEY = 'dsh-au.shortcuts-enabled';
     const SHORTCUT_CONFIG_MESSAGE = 'shortcut-config';
     const SHORTCUT_ACTION_MESSAGE = 'shortcut-action';
     const TODO_TOGGLE_EVENT = 'dsh-au:toggle-todo';
@@ -1185,6 +1191,15 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /** 只有明确记录为开启才启用快捷键；没有记录或读取失败都视为关闭。 */
+    function readShortcutsEnabled() {
+      try { return localStorage.getItem(SHORTCUTS_ENABLED_STORAGE_KEY) === 'true'; } catch { return false; }
+    }
+
+    function writeShortcutsEnabled(enabled) {
+      try { localStorage.setItem(SHORTCUTS_ENABLED_STORAGE_KEY, enabled ? 'true' : 'false'); } catch {}
+    }
+
     function writeShortcutOverrides(overrides) {
       try {
         if (Object.keys(overrides).length) localStorage.setItem(SHORTCUT_STORAGE_KEY, JSON.stringify(overrides));
@@ -1212,7 +1227,8 @@ window.__ModuleLoader__.load({
 
     /** 命中哪个动作；录入新快捷键期间一律不触发，避免边录边执行。 */
     function findShortcutAction(event, overrides = shortcutStore.overrides) {
-      if (shortcutStore.recording) return null;
+      // 总开关关闭时一律不命中，本机与远程页面的快捷键都不生效。
+      if (shortcutStore.recording || !shortcutStore.enabled) return null;
       for (const action of SHORTCUT_ACTIONS) {
         if (matchesShortcutBinding(event, effectiveShortcutBinding(action.id, overrides))) return action.id;
       }
@@ -1269,9 +1285,30 @@ window.__ModuleLoader__.load({
 
     const shortcutStore = {
       overrides: {},
+      enabled: false,
       listeners: new Set(),
       recording: false,
     };
+
+    /** 切换总开关并通知订阅方（设置页、DSH 注册表同步、受控 iframe 推送）。 */
+    function setShortcutsEnabled(next, { persist = true } = {}) {
+      const enabled = next === true;
+      if (persist) writeShortcutsEnabled(enabled);
+      if (shortcutStore.enabled === enabled) return;
+      shortcutStore.enabled = enabled;
+      for (const listener of [...shortcutStore.listeners]) listener(shortcutStore.overrides);
+    }
+
+    function useShortcutsEnabled() {
+      const [enabled, setEnabled] = useState(shortcutStore.enabled);
+      useEffect(() => {
+        const listener = () => setEnabled(shortcutStore.enabled);
+        shortcutStore.listeners.add(listener);
+        listener();
+        return () => { shortcutStore.listeners.delete(listener); };
+      }, []);
+      return enabled;
+    }
 
     function setShortcutOverrides(next, { persist = true } = {}) {
       shortcutStore.overrides = next;
@@ -1304,12 +1341,16 @@ window.__ModuleLoader__.load({
     /** 外层页读本地存储并监听其他标签页的修改；受控 iframe 一律等外层推送，绝不读自己的存储。 */
     function initShortcutStore() {
       if (isControlledFrame()) {
+        // 受控 iframe 先保持关闭，等外层推送总开关与覆盖表。
+        setShortcutsEnabled(false, { persist: false });
         setShortcutOverrides({}, { persist: false });
         return () => {};
       }
+      setShortcutsEnabled(readShortcutsEnabled(), { persist: false });
       setShortcutOverrides(readShortcutOverrides(), { persist: false });
       const onStorage = (event) => {
         if (event.key === SHORTCUT_STORAGE_KEY) setShortcutOverrides(readShortcutOverrides(), { persist: false });
+        if (event.key === SHORTCUTS_ENABLED_STORAGE_KEY) setShortcutsEnabled(readShortcutsEnabled(), { persist: false });
       };
       window.addEventListener('storage', onStorage);
       return () => window.removeEventListener('storage', onStorage);
@@ -1322,6 +1363,7 @@ window.__ModuleLoader__.load({
           ? Boolean(featuresStore?.snapshot?.fullAccessByDefault)
           : false;
         frameWindow?.postMessage({ source: 'dsh-au', type: SHORTCUT_CONFIG_MESSAGE, overrides: shortcutStore.overrides,
+          shortcutsEnabled: shortcutStore.enabled,
           modelShortcuts: { enabled, binding, loaded },
           modelShortcutOpen: modelShortcutPopup.snapshot.open && modelShortcutTarget.frame?.contentWindow === frameWindow,
           modelShortcutGeneration,
@@ -1342,6 +1384,8 @@ window.__ModuleLoader__.load({
       describeShortcutBinding,
       normalizeShortcutOverrides,
       setShortcutOverrides,
+      setShortcutsEnabled,
+      readShortcutsEnabled,
       shortcutDeviceDirection,
       installControlledFrameShortcutBridge,
       postShortcutConfig,
@@ -8069,6 +8113,22 @@ window.__ModuleLoader__.load({
         navigateToAuthenticatedRemote(routeId, frameName);
       }, [activeId, directFrameRoutes, hosts, reloadSeq]);
 
+      // 远程 DSH 管理总开关：关闭时不渲染设备栏、远程舞台与悬浮胶囊（放在全部 state 之后，保持 hook 顺序稳定）。
+      // featuresStore 定义在设置页片段；单独加载外壳时按默认开启处理。
+      const remoteManagementEnabled = typeof useFeatures === 'function' ? useFeatures().remoteManagement !== false : true;
+
+      // 设置页「管理远程设备」按钮请求打开远程设备管理弹窗。
+      useEffect(() => {
+        const onOpenRemoteManager = () => setRemoteManager(true);
+        window.addEventListener(OPEN_REMOTE_MANAGER_EVENT, onOpenRemoteManager);
+        return () => window.removeEventListener(OPEN_REMOTE_MANAGER_EVENT, onOpenRemoteManager);
+      }, []);
+
+      // 关闭远程 DSH 管理时，若正停留在远程设备上则先回到本机。
+      useEffect(() => {
+        if (!remoteManagementEnabled && activeId) selectLocal({ reason: 'remote-management-off' });
+      }, [remoteManagementEnabled, activeId, selectLocal]);
+
       // 若已打开的远端后来确认是本机映射，立即回到本机而不是留下空白舞台。
       useEffect(() => {
         if (activeId && !devices.some((device) => device.id === activeId)) selectLocal({ reason: 'device-missing' });
@@ -8499,9 +8559,9 @@ window.__ModuleLoader__.load({
       return h(
         React.Fragment,
         null,
-        hosts && !topbarCollapsed ? ReactDOM.createPortal(topbar, hosts.topHost) : null,
-        hosts ? ReactDOM.createPortal(stage, hosts.stageHost) : null,
-        topbarCollapsed ? ReactDOM.createPortal(floatingCapsule, hosts?.stageHost || document.body) : null,
+        remoteManagementEnabled && hosts && !topbarCollapsed ? ReactDOM.createPortal(topbar, hosts.topHost) : null,
+        remoteManagementEnabled && hosts ? ReactDOM.createPortal(stage, hosts.stageHost) : null,
+        remoteManagementEnabled && topbarCollapsed ? ReactDOM.createPortal(floatingCapsule, hosts?.stageHost || document.body) : null,
         editingDevice ? ReactDOM.createPortal(h(DeviceModal, { initial: editingDevice, onClose: () => setEditingDevice(null), onSave: handleSaveDevice }), document.body) : null,
         editingRemote ? ReactDOM.createPortal(h(RouteModal, { initial: editingRemote, devices: allDevices, onClose: () => setEditingRemote(null), onSave: handleSaveRoute, onDelete: handleDeleteRoute }), document.body) : null,
         remoteManager ? ReactDOM.createPortal(h(RemoteManagerModal, {
@@ -8827,7 +8887,7 @@ window.__ModuleLoader__.load({
     /** 内置功能开关存宿主机配置；新建目标限制默认关闭，不投射到其他主机。 */
     const featuresStore = {
       snapshot: {
-        todo: false, fullAccessByDefault: false, blockGoalCreation: false, disconnectRemotesOnLock: false, goalCreationError: '',
+        todo: false, remoteManagement: true, fullAccessByDefault: false, blockGoalCreation: false, disconnectRemotesOnLock: false, goalCreationError: '',
         loaded: false, busy: false, error: '',
         /** 自动续跑默认关闭，且没有规则。 */
         autoContinue: { enabled: false, retryDelaySec: 60, maxRetries: 5, compactOnDisconnect: true, continueOnTruncate: true, prompt: '继续', rules: [] },
@@ -8889,6 +8949,7 @@ window.__ModuleLoader__.load({
           };
           publishFeatures({
             todo: res.features.todo !== false,
+            remoteManagement: res.features.remoteManagement !== false,
             fullAccessByDefault: res.features.fullAccessByDefault === true,
             blockGoalCreation: res.features.blockGoalCreation === true,
             disconnectRemotesOnLock: res.features.disconnectRemotesOnLock === true,
@@ -8910,6 +8971,18 @@ window.__ModuleLoader__.load({
         if (!res?.ok) throw new Error(res?.error || 'save failed');
         publishFeatures({ todo: res.features.todo !== false, busy: false });
         broadcastFeaturesToControlledFrames();
+      } catch {
+        publishFeatures({ busy: false, error: '保存失败，请稍后重试' });
+      }
+    }
+
+    /** 远程 DSH 管理开关存宿主配置；关闭后外壳立即收起设备栏与远程页面。 */
+    async function saveRemoteManagementFeature(next) {
+      publishFeatures({ busy: true, error: '' });
+      try {
+        const res = await callApi('saveFeatures', { remoteManagement: Boolean(next) });
+        if (!res?.ok || typeof res.features?.remoteManagement !== 'boolean') throw new Error(res?.error || 'save failed');
+        publishFeatures({ remoteManagement: res.features.remoteManagement, busy: false });
       } catch {
         publishFeatures({ busy: false, error: '保存失败，请稍后重试' });
       }
@@ -9063,6 +9136,47 @@ window.__ModuleLoader__.load({
       });
     }
 
+    /** 远程 DSH 管理：开关控制设备栏是否出现；按钮直接打开远程设备管理弹窗。 */
+    function RemoteManagementFeatureGroup() {
+      const features = useFeatures();
+      const titleId = 'dsh-au-feature-remote-management-title';
+      const enabled = features.remoteManagement !== false;
+      return h(
+        'section',
+        { className: 'dsh-au-settings-group', 'aria-labelledby': titleId },
+        h('h3', { id: titleId }, '远程 DSH 管理'),
+        h(SettingsItem, {
+          title: '启用远程 DSH 管理',
+          description: '在对话顶部显示设备栏，可切换和管理本机与远程 DSH 设备。关闭后设备栏与远程页面全部隐藏，打开后立即恢复。',
+          hint: features.error || (enabled ? '已开启：顶部显示设备栏。' : '已关闭：设备栏与远程页面已隐藏。'),
+          control: h(
+            'button',
+            {
+              type: 'button',
+              role: 'switch',
+              className: 'dsh-au-switch',
+              'aria-checked': enabled,
+              'aria-labelledby': titleId,
+              disabled: !features.loaded || features.busy,
+              onClick: () => { void saveRemoteManagementFeature(!enabled); },
+            },
+            h('span', { className: 'dsh-au-switch-knob', 'aria-hidden': 'true' })
+          ),
+          actions: h(
+            'button',
+            {
+              type: 'button',
+              className: 'dsh-au-btn',
+              disabled: !enabled,
+              // 由外壳统一打开远程设备管理弹窗，避免在设置页重复一份设备状态。
+              onClick: () => window.dispatchEvent(new CustomEvent(OPEN_REMOTE_MANAGER_EVENT)),
+            },
+            '管理远程设备'
+          ),
+        })
+      );
+    }
+
     function FullAccessFeatureGroup() {
       const features = useFeatures();
       return h(FeatureSwitchGroup, {
@@ -9111,7 +9225,7 @@ window.__ModuleLoader__.load({
       return h(FeatureSwitchGroup, {
         id: 'mobile',
         heading: 'DSH 移动端优化',
-        title: '启用移动端抽屉',
+        title: '启用移动端优化',
         description: '适配移动端 DSH，界面更简洁，内容展示更充分。',
         checked: enabled,
         disabled: false,
@@ -10839,7 +10953,8 @@ window.__ModuleLoader__.load({
       return h(
         'div',
         { className: 'dsh-au-settings-page' },
-        h(SettingsCategory, { id: 'workspace', title: '工作台', hint: '待办 · 移动端 · 窗口', defaultOpen: true },
+        h(SettingsCategory, { id: 'workspace', title: '工作台', hint: '远程 · 待办 · 移动端 · 窗口', defaultOpen: true },
+          h(RemoteManagementFeatureGroup),
           h(TodoFeatureGroup),
           h(MobileFeatureGroup),
           h(WindowMemoryFeatureGroup),
@@ -10968,6 +11083,7 @@ window.__ModuleLoader__.load({
     /** 设置页外层清爽入口：单行展示 + 「配置快捷键」按钮打开独立弹窗（内部复用 ShortcutSettingsGroup）。 */
     function ShortcutSettingsSection() {
       const overrides = useShortcutOverrides();
+      const shortcutsEnabled = useShortcutsEnabled();
       const [modalOpen, setModalOpen] = useState(false);
       const titleId = 'dsh-au-shortcuts-section-title';
       const customCount = Object.keys(overrides).length;
@@ -10975,7 +11091,9 @@ window.__ModuleLoader__.load({
         const binding = effectiveShortcutBinding(action.id, overrides);
         return `${action.label}：${describeShortcutBinding(binding)}`;
       });
-      const hintText = `共 ${SHORTCUT_ACTIONS.length} 项快捷键（已自定义 ${customCount} 项）· ${summaryItems.join(' · ')} · 设置保存在当前浏览器`;
+      const hintText = shortcutsEnabled
+        ? `共 ${SHORTCUT_ACTIONS.length} 项快捷键（已自定义 ${customCount} 项）· ${summaryItems.join(' · ')} · 设置保存在当前浏览器`
+        : '已关闭：以下快捷键全部不响应，打开开关后立即生效。设置保存在当前浏览器。';
 
       useEffect(() => {
         if (!modalOpen) return undefined;
@@ -11006,6 +11124,19 @@ window.__ModuleLoader__.load({
           title: '全局与远程页面快捷键',
           description: '自定义工作台、新建会话与设备切换等组合键；设置只保存在当前浏览器，焦点在远端设备页面里时同样生效。',
           hint: hintText,
+          // 总开关：默认关闭，关闭时本机与远程页面的快捷键都不生效（模型快捷切换由其自身开关控制）。
+          control: h(
+            'button',
+            {
+              type: 'button',
+              role: 'switch',
+              className: 'dsh-au-switch',
+              'aria-checked': shortcutsEnabled,
+              'aria-labelledby': titleId,
+              onClick: () => setShortcutsEnabled(!shortcutsEnabled),
+            },
+            h('span', { className: 'dsh-au-switch-knob', 'aria-hidden': 'true' })
+          ),
           actions: h(
             'button',
             {
@@ -17593,7 +17724,9 @@ window.__ModuleLoader__.load({
           };
         }, []);
 
-        if (!mountNode || typeof ReactDOM.createPortal !== 'function') return null;
+        // 远程 DSH 管理关闭时，侧栏不再展示远程设备工作区。
+        const remoteManagementEnabled = useFeatures().remoteManagement !== false;
+        if (!remoteManagementEnabled || !mountNode || typeof ReactDOM.createPortal !== 'function') return null;
         return ReactDOM.createPortal(h(RemoteWorkspacesTree), mountNode);
       }
 
@@ -19682,6 +19815,8 @@ window.__ModuleLoader__.load({
         };
         const sync = () => {
           clear();
+          // 快捷键总开关关闭时不向 DSH 注册表交出任何键位。
+          if (!shortcutStore.enabled) return;
           disposers.push(
             register('device.previous', 'dsh-au.device.previous', '切换到左侧设备', 'BracketLeft', -1),
             register('device.next', 'dsh-au.device.next', '切换到右侧设备', 'BracketRight', 1),

@@ -1,7 +1,7 @@
     /** 内置功能开关存宿主机配置；新建目标限制默认关闭，不投射到其他主机。 */
     const featuresStore = {
       snapshot: {
-        todo: false, fullAccessByDefault: false, blockGoalCreation: false, disconnectRemotesOnLock: false, goalCreationError: '',
+        todo: false, remoteManagement: true, fullAccessByDefault: false, blockGoalCreation: false, disconnectRemotesOnLock: false, goalCreationError: '',
         loaded: false, busy: false, error: '',
         /** 自动续跑默认关闭，且没有规则。 */
         autoContinue: { enabled: false, retryDelaySec: 60, maxRetries: 5, compactOnDisconnect: true, continueOnTruncate: true, prompt: '继续', rules: [] },
@@ -63,6 +63,7 @@
           };
           publishFeatures({
             todo: res.features.todo !== false,
+            remoteManagement: res.features.remoteManagement !== false,
             fullAccessByDefault: res.features.fullAccessByDefault === true,
             blockGoalCreation: res.features.blockGoalCreation === true,
             disconnectRemotesOnLock: res.features.disconnectRemotesOnLock === true,
@@ -84,6 +85,18 @@
         if (!res?.ok) throw new Error(res?.error || 'save failed');
         publishFeatures({ todo: res.features.todo !== false, busy: false });
         broadcastFeaturesToControlledFrames();
+      } catch {
+        publishFeatures({ busy: false, error: '保存失败，请稍后重试' });
+      }
+    }
+
+    /** 远程 DSH 管理开关存宿主配置；关闭后外壳立即收起设备栏与远程页面。 */
+    async function saveRemoteManagementFeature(next) {
+      publishFeatures({ busy: true, error: '' });
+      try {
+        const res = await callApi('saveFeatures', { remoteManagement: Boolean(next) });
+        if (!res?.ok || typeof res.features?.remoteManagement !== 'boolean') throw new Error(res?.error || 'save failed');
+        publishFeatures({ remoteManagement: res.features.remoteManagement, busy: false });
       } catch {
         publishFeatures({ busy: false, error: '保存失败，请稍后重试' });
       }
@@ -237,6 +250,47 @@
       });
     }
 
+    /** 远程 DSH 管理：开关控制设备栏是否出现；按钮直接打开远程设备管理弹窗。 */
+    function RemoteManagementFeatureGroup() {
+      const features = useFeatures();
+      const titleId = 'dsh-au-feature-remote-management-title';
+      const enabled = features.remoteManagement !== false;
+      return h(
+        'section',
+        { className: 'dsh-au-settings-group', 'aria-labelledby': titleId },
+        h('h3', { id: titleId }, '远程 DSH 管理'),
+        h(SettingsItem, {
+          title: '启用远程 DSH 管理',
+          description: '在对话顶部显示设备栏，可切换和管理本机与远程 DSH 设备。关闭后设备栏与远程页面全部隐藏，打开后立即恢复。',
+          hint: features.error || (enabled ? '已开启：顶部显示设备栏。' : '已关闭：设备栏与远程页面已隐藏。'),
+          control: h(
+            'button',
+            {
+              type: 'button',
+              role: 'switch',
+              className: 'dsh-au-switch',
+              'aria-checked': enabled,
+              'aria-labelledby': titleId,
+              disabled: !features.loaded || features.busy,
+              onClick: () => { void saveRemoteManagementFeature(!enabled); },
+            },
+            h('span', { className: 'dsh-au-switch-knob', 'aria-hidden': 'true' })
+          ),
+          actions: h(
+            'button',
+            {
+              type: 'button',
+              className: 'dsh-au-btn',
+              disabled: !enabled,
+              // 由外壳统一打开远程设备管理弹窗，避免在设置页重复一份设备状态。
+              onClick: () => window.dispatchEvent(new CustomEvent(OPEN_REMOTE_MANAGER_EVENT)),
+            },
+            '管理远程设备'
+          ),
+        })
+      );
+    }
+
     function FullAccessFeatureGroup() {
       const features = useFeatures();
       return h(FeatureSwitchGroup, {
@@ -285,7 +339,7 @@
       return h(FeatureSwitchGroup, {
         id: 'mobile',
         heading: 'DSH 移动端优化',
-        title: '启用移动端抽屉',
+        title: '启用移动端优化',
         description: '适配移动端 DSH，界面更简洁，内容展示更充分。',
         checked: enabled,
         disabled: false,
@@ -2013,7 +2067,8 @@
       return h(
         'div',
         { className: 'dsh-au-settings-page' },
-        h(SettingsCategory, { id: 'workspace', title: '工作台', hint: '待办 · 移动端 · 窗口', defaultOpen: true },
+        h(SettingsCategory, { id: 'workspace', title: '工作台', hint: '远程 · 待办 · 移动端 · 窗口', defaultOpen: true },
+          h(RemoteManagementFeatureGroup),
           h(TodoFeatureGroup),
           h(MobileFeatureGroup),
           h(WindowMemoryFeatureGroup),

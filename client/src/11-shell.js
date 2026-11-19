@@ -848,6 +848,22 @@
         navigateToAuthenticatedRemote(routeId, frameName);
       }, [activeId, directFrameRoutes, hosts, reloadSeq]);
 
+      // 远程 DSH 管理总开关：关闭时不渲染设备栏、远程舞台与悬浮胶囊（放在全部 state 之后，保持 hook 顺序稳定）。
+      // featuresStore 定义在设置页片段；单独加载外壳时按默认开启处理。
+      const remoteManagementEnabled = typeof useFeatures === 'function' ? useFeatures().remoteManagement !== false : true;
+
+      // 设置页「管理远程设备」按钮请求打开远程设备管理弹窗。
+      useEffect(() => {
+        const onOpenRemoteManager = () => setRemoteManager(true);
+        window.addEventListener(OPEN_REMOTE_MANAGER_EVENT, onOpenRemoteManager);
+        return () => window.removeEventListener(OPEN_REMOTE_MANAGER_EVENT, onOpenRemoteManager);
+      }, []);
+
+      // 关闭远程 DSH 管理时，若正停留在远程设备上则先回到本机。
+      useEffect(() => {
+        if (!remoteManagementEnabled && activeId) selectLocal({ reason: 'remote-management-off' });
+      }, [remoteManagementEnabled, activeId, selectLocal]);
+
       // 若已打开的远端后来确认是本机映射，立即回到本机而不是留下空白舞台。
       useEffect(() => {
         if (activeId && !devices.some((device) => device.id === activeId)) selectLocal({ reason: 'device-missing' });
@@ -1278,9 +1294,9 @@
       return h(
         React.Fragment,
         null,
-        hosts && !topbarCollapsed ? ReactDOM.createPortal(topbar, hosts.topHost) : null,
-        hosts ? ReactDOM.createPortal(stage, hosts.stageHost) : null,
-        topbarCollapsed ? ReactDOM.createPortal(floatingCapsule, hosts?.stageHost || document.body) : null,
+        remoteManagementEnabled && hosts && !topbarCollapsed ? ReactDOM.createPortal(topbar, hosts.topHost) : null,
+        remoteManagementEnabled && hosts ? ReactDOM.createPortal(stage, hosts.stageHost) : null,
+        remoteManagementEnabled && topbarCollapsed ? ReactDOM.createPortal(floatingCapsule, hosts?.stageHost || document.body) : null,
         editingDevice ? ReactDOM.createPortal(h(DeviceModal, { initial: editingDevice, onClose: () => setEditingDevice(null), onSave: handleSaveDevice }), document.body) : null,
         editingRemote ? ReactDOM.createPortal(h(RouteModal, { initial: editingRemote, devices: allDevices, onClose: () => setEditingRemote(null), onSave: handleSaveRoute, onDelete: handleDeleteRoute }), document.body) : null,
         remoteManager ? ReactDOM.createPortal(h(RemoteManagerModal, {
