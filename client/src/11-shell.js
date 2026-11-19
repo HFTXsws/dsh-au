@@ -732,6 +732,8 @@
           const route = selectedDevice.selectedRoute;
           reportClientEvent('select-device', id);
           if (route?.transport === 'lan' || route?.kind === 'lan') window.location.assign(selectedDevice.targetUrl);
+          // 本机浏览器走本机代登录通道：凭据只在本机服务端注入，浏览器地址里没有密码。
+          else if (!selectedDevice.useDirectNavigation && selectedDevice.targetUrl) window.location.assign(selectedDevice.targetUrl);
           else if (route?.id) navigateToAuthenticatedRemote(route.id);
           return;
         }

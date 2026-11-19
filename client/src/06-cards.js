@@ -182,7 +182,7 @@
                     h(LanIcon, { key: 'icon' }),
                     h('span', { key: 'text' }, '本机局域网接入'),
                   ]),
-                  h('span', { key: 'hint', className: 'dsh-au-remote-row-state' }, lanOn ? '局域网设备可通过“局域网”路径连接本机。' : '已关闭局域网接入；开启后才会响应局域网连接。'),
+                  h('span', { key: 'hint', className: 'dsh-au-remote-row-state' }, lanOn ? '已开启：同一局域网内能访问本机端口的人无需密码即可使用本机 DSH，请只在可信网络开启。' : '默认关闭；开启后局域网设备可通过“局域网”路径免密连接本机。'),
                 ]),
                 h('span', { key: 'actions', className: 'dsh-au-lan-control-actions' }, [
                   h('button', { key: 'toggle', type: 'button', className: `dsh-au-btn ${lanOn ? 'on' : 'off'}`, 'aria-pressed': lanOn, onClick: onToggleLan, title: `局域网接入：${lanOn ? '已开启' : '已关闭'}` }, lanOn ? '已开启' : '已关闭'),

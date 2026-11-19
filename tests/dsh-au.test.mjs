@@ -439,10 +439,14 @@ test('config-store initializes default remote and persists updates', () => {
   process.env.DSH_AU_CONFIG_PATH = join(dir, 'dsh-au.config.json');
   try {
     const cfg = loadConfig();
-    assert.equal(cfg.lanShareEnabled, true);
+    // 局域网免密接入默认关闭，必须由用户明确开启。
+    assert.equal(cfg.lanShareEnabled, false);
     // 开源默认云清单没有内置设备；远程路线只来自私人仓库云清单。
     assert.deepEqual(cfg.remotes, []);
 
+    cfg.lanShareEnabled = true;
+    saveConfig(cfg);
+    assert.equal(loadConfig().lanShareEnabled, true);
     cfg.lanShareEnabled = false;
     saveConfig(cfg);
     const reloaded = loadConfig();
@@ -1149,6 +1153,13 @@ test('lan-bridge exchanges local launch token cookie and respects lanShareEnable
     const page = await httpGet(`http://127.0.0.1:${bridgePort}/chat`);
     assert.equal(page.status, 200);
     assert.equal(page.body, 'local_dsh:browser_session=valid_1');
+
+    // 跳转接口会带出已保存的远端凭据，任何写法都不能经桥接访问。
+    for (const blockedPath of ['/dsh-au/connect', '//dsh-au//connect/', '/dsh/DSH-AU/Connect', '/dsh-au/%63onnect', '/dsh-au/connect?x=1', '/dsh-au/%E0%A4%A']) {
+      const denied = await httpGet(`http://127.0.0.1:${bridgePort}${blockedPath}`);
+      assert.equal(denied.status, 403, blockedPath);
+      assert.doesNotMatch(denied.body, /local_dsh/, blockedPath);
+    }
 
     shareEnabled = false;
     const blocked = await httpGet(`http://127.0.0.1:${bridgePort}/chat`);

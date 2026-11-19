@@ -297,7 +297,9 @@ test('本机打开管理弹窗，原 LAN 行显示本机和当前且没有回环
 test('浏览器顶栏点设备整页跳到穿透，不打开保活 iframe', () => {
   const client = shellClient();
   tab(client.render(), 'win').props.onClick();
-  assert.deepEqual(client.navigations, [{ action: '/dsh-au/connect', target: '' }]);
+  // 本机浏览器走本机代登录通道：地址里不带远端密码，也不再经过跳转接口。
+  assert.deepEqual(client.navigations, [TUNNEL_URL]);
+  assert.ok(!String(client.navigations[0]).includes('@'));
   assert.equal(findAll(client.render(), (node) => node.type === client.frameType).length, 0);
 });
 

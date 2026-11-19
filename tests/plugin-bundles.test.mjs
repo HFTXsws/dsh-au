@@ -573,6 +573,16 @@ test('writePluginBundle rejects plaintext credentials but allows env placeholder
       '- id: demo\n  config:\n    authorization: Bearer plain-bearer\n',
       '- id: demo\n  config:\n    webhook: https://user:pass@example.com/hook\n',
       '- id: demo\n  config:\n    webhook: https://example.com/hook?token=plain123\n',
+      // 花括号内联写法、驼峰字段名、明文与变量引用混写，都必须拦下。
+      '- id: demo\n  config: {password: inline-secret}\n',
+      '- id: demo\n  config:\n    db: { user: admin, "password": "inline-secret" }\n',
+      '- id: demo\n  config:\n    authToken: real-token-value\n',
+      '- id: demo\n  config:\n    botToken: real-token-value\n',
+      '- id: demo\n  config:\n    apiKey: sk-live-123${HOME}\n',
+      '- id: demo\n  config:\n    token: sk-xx process.env.X\n',
+      '- id: demo\n  config:\n    secret: plain keychain\n',
+      '- id: demo\n  config:\n    webhook: https://example.com/hook?token=plain${X}\n',
+      '- id: demo\n  config:\n    webhook: https://user:plainpass@example.com/hook\n',
     ];
     for (const configText of badConfigs) {
       assert.throws(
@@ -603,6 +613,8 @@ test('writePluginBundle rejects plaintext credentials but allows env placeholder
       '    botToken: getenv("BOT_TOKEN")',
       '    maxTokens: 4096',
       '    endpoint: https://example.com/hook?token=${HOOK_TOKEN}',
+      '    headers: { authorization: "Bearer ${API_TOKEN}", accept: json }',
+      '    proxy: https://user:${PROXY_PASS}@example.com/',
       '',
     ].join('\n');
     const written = writePluginBundle({

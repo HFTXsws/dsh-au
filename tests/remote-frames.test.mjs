@@ -459,7 +459,8 @@ test('browser topbar tab leaves the page; sidebar selection keeps the iframe', a
   const devices = [device('mac', [{ id: 'tunnel', type: 'tunnel' }, { id: 'lan', type: 'lan', url: 'http://192.0.2.10:31990/' }])];
   const { browser, host } = await shell(t, state(devices, { lan: { status: 'offline', online: false } }));
   await click(host, browser, 'mac内网穿透');
-  assert.deepEqual(browser.navigations, [{ action: '/dsh-au/connect', target: '' }]);
+  // 本机浏览器走本机代登录通道：地址里不带远端密码，也不再经过跳转接口。
+  assert.deepEqual(browser.navigations, ['http://127.0.0.1:9000/']);
   assert.equal(frames(host).length, 0);
   browser.navigations.length = 0;
   await openStage(host, browser, 'mac');
