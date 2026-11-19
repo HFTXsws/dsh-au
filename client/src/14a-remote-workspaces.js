@@ -735,8 +735,12 @@
                 const pinnedVal = store.pinnedSessionOverrides.has(ls.sessionId)
                   ? store.pinnedSessionOverrides.get(ls.sessionId)
                   : Boolean(ls.pinned || prev.pinned);
-                // 占位标题（未命名对话 / 空白会话的「新对话」）不得覆盖另一侧的真实标题
-                const isPlaceholderTitle = (s) => !s.title || s.title === '未命名对话' || (s.blank && s.title === '新对话');
+                // 占位标题（未命名对话 / 空白会话的「新对话」/ 工作区兜底目录名）不得覆盖另一侧的真实标题
+                const isPlaceholderTitle = (s) => {
+                  const t = String(s?.title || '').trim();
+                  const lower = t.toLowerCase();
+                  return !t || t === '未命名对话' || lower === 'default-workspace' || lower === 'default' || t === '默认工作区' || (s?.blank && t === '新对话');
+                };
                 const isConfirmedNonBlank = (s) => !s?.blank && (
                   !isPlaceholderTitle(s)
                   || Boolean(s?.summary && String(s.summary).trim())

@@ -58,7 +58,12 @@ window.__ModuleLoader__.load({
 
     async function syncControlledHostDefaultPreset(enabled, ctx = controlledClientCtx) {
       const targetPreset = enabled ? 'danger-full-access' : 'workspace-write';
-      const remoteSettings = ctx?.remote?.settings;
+      let remoteSettings = null;
+      try {
+        remoteSettings = ctx?.get?.('remote')?.settings || ctx?.remote?.settings || null;
+      } catch {
+        remoteSettings = null;
+      }
       if (remoteSettings && typeof remoteSettings.mutate === 'function') {
         try {
           await remoteSettings.mutate('permission', [
@@ -392,9 +397,16 @@ window.__ModuleLoader__.load({
         const isCurrentActiveBlank = Boolean(row?.blank && currentSessionId && sid === currentSessionId);
         if (typeof sid !== 'string' || !sid || row?.origin === 'subagent' || (row?.blank && !isCurrentActiveBlank) || archivedSet.has(sid)) return null;
         const values = row?.projections?.values || row?.projectionValues || projectionsBySession[sid]?.values || {};
-        const rawTitle = (typeof values.title === 'string' && values.title.trim())
-          || (typeof row?.displayTitle === 'string' && row.displayTitle.trim())
-          || (typeof row?.title === 'string' && row.title.trim())
+        const pickRealTitle = (val) => {
+          if (typeof val !== 'string') return '';
+          const trimmed = val.trim();
+          const lower = trimmed.toLowerCase();
+          if (!trimmed || lower === 'default-workspace' || lower === 'default' || trimmed === '默认工作区') return '';
+          return trimmed;
+        };
+        const rawTitle = pickRealTitle(values.title)
+          || pickRealTitle(row?.displayTitle)
+          || pickRealTitle(row?.title)
           || (isCurrentActiveBlank ? '新对话' : '未命名对话');
         const title = sanitizeTextForSync(rawTitle);
         const cwd = sanitizeTextForSync(String(row?.cwd || row?.path || values.workingDirectory || fallbackPath || '').trim());
@@ -852,15 +864,32 @@ window.__ModuleLoader__.load({
           const open = async (method, target) => {
             if (typeof uiWorkspace?.[method] !== 'function') return false;
             await awaitNavigation(navigation, () => uiWorkspace[method](target));
-            opened = true;
             if (method === 'openSession' && target === sid) {
+              let resident = sessionsSvc?.manager?.sessions?.get?.(sid);
+              const errMsg = String(resident?.openError?.message || resident?.openError || '');
+              if (resident?.openState === 'error' && /is released/i.test(errMsg) && !resident.__dshAuOpenRecovered) {
+                resident.__dshAuOpenRecovered = true;
+                try { delete resident.__dshAuPreloaded; } catch { resident.__dshAuPreloaded = null; }
+                try {
+                  if (typeof sessionsSvc?.manager?.sessions?.delete === 'function') {
+                    sessionsSvc.manager.sessions.delete(sid);
+                  }
+                } catch {}
+                await awaitNavigation(navigation, () => uiWorkspace[method](target));
+                resident = sessionsSvc?.manager?.sessions?.get?.(sid);
+              }
+              if (resident?.openState === 'error') {
+                throw resident.openError instanceof Error ? resident.openError : new Error('session-open-error');
+              }
+              opened = true;
               openedRequestedSession = true;
               // 已打开会话的 open() 不会再进入 doOpen；补发状态，避免外层误等 30 秒。
-              const resident = sessionsSvc?.manager?.sessions?.get?.(sid);
               if (resident?.openState === 'open' && resident.openPromise == null && typeof postControlledSessionMetric === 'function') {
                 postControlledSessionMetric('foreground-state', sid, { stage: 'already-open', result: 'open', generation: resident.openGeneration, elapsedMs: 0 });
               }
+              return true;
             }
+            opened = true;
             return true;
           };
           const runNavigation = async () => {
@@ -6735,7 +6764,7 @@ window.__ModuleLoader__.load({
       return typeof window !== 'undefined' && typeof window.performance?.now === 'function' ? window.performance.now() : Date.now();
     }
 
-    function installSessionInstantOpenHook(session) {
+    function installSessionInstantOpenHook(session, manager = null) {
       if (!session || typeof session !== 'object' || typeof session.doOpen !== 'function' || session.__dshAuInstantOpenHooked) {
         return session;
       }
@@ -6751,11 +6780,43 @@ window.__ModuleLoader__.load({
         });
         let stallTimer = null;
         trace('open-start', 'loading');
+        const tryRecoverReleasedRef = (error) => {
+          const msg = String(error?.message || error || this.openError?.message || this.openError || '');
+          if (!/is released/i.test(msg)) return null;
+          try { delete this.__dshAuPreloaded; } catch { this.__dshAuPreloaded = null; }
+          if (this.__dshAuReleasedRetried) return null;
+          this.__dshAuReleasedRetried = true;
+          trace('released-retry', 'retrying');
+          try {
+            if (manager?.sessions?.get?.(this.sessionId) === this && typeof manager.sessions?.delete === 'function') {
+              manager.sessions.delete(this.sessionId);
+              const fresh = typeof manager.get === 'function' ? manager.get(this.sessionId) : null;
+              if (fresh && fresh !== this) {
+                if (typeof fresh.open === 'function') return Promise.resolve(fresh.open());
+                if (typeof fresh.doOpen === 'function') return Promise.resolve(fresh.doOpen(fresh.openGeneration ?? generation, ...rest));
+              }
+            }
+          } catch {}
+          if (typeof this.resync === 'function') {
+            return Promise.resolve(this.resync());
+          }
+          return null;
+        };
         const finish = () => {
           if (stallTimer !== null && typeof clearTimeout === 'function') clearTimeout(stallTimer);
           if (generation !== this.openGeneration) return;
           const failed = this.openState === 'error';
-          if (this.openState === 'open') this.__dshAuStallRetried = false;
+          if (this.openState === 'open') {
+            this.__dshAuStallRetried = false;
+            this.__dshAuReleasedRetried = false;
+          }
+          if (failed && /is released/i.test(String(this.openError?.message || this.openError || ''))) {
+            const recovery = tryRecoverReleasedRef(this.openError);
+            if (recovery) {
+              recovery.catch(() => trace('released-retry-failed', 'error'));
+              return;
+            }
+          }
           if (hadPreloaded && failed) {
             this.openState = 'open';
             this.openError = null;
@@ -6775,7 +6836,15 @@ window.__ModuleLoader__.load({
         }
         let promise;
         try { promise = origDoOpen.call(this, generation, ...rest); }
-        catch (error) { finish(); throw error; }
+        catch (error) {
+          const recovery = tryRecoverReleasedRef(error);
+          if (recovery) {
+            if (stallTimer !== null && typeof clearTimeout === 'function') clearTimeout(stallTimer);
+            return recovery;
+          }
+          finish();
+          throw error;
+        }
         if (hadPreloaded && this.openState === 'loading') {
           this.openState = 'open';
           this.openError = null;
@@ -6783,7 +6852,20 @@ window.__ModuleLoader__.load({
           trace('window-ready', 'cached', { recordCount: this.__dshAuPreloaded.count || 0 });
         }
         trace('open-dispatched', this.openState, { syncMs: Math.max(0, sessionPerformanceNow() - startedAt) });
-        if (promise && typeof promise.finally === 'function') return promise.finally(finish);
+        if (promise && typeof promise.then === 'function') {
+          return promise.then(
+            (val) => { finish(); return val; },
+            (error) => {
+              const recovery = tryRecoverReleasedRef(error);
+              if (recovery) {
+                if (stallTimer !== null && typeof clearTimeout === 'function') clearTimeout(stallTimer);
+                return recovery;
+              }
+              finish();
+              throw error;
+            }
+          );
+        }
         finish();
         return promise;
       };
@@ -6813,7 +6895,7 @@ window.__ModuleLoader__.load({
         if (signal?.aborted || !pageRes?.ok || !Array.isArray(pageRes.value?.records)) return false;
         const session = manager.get(entry.sessionId);
         if (!session || typeof session.installWindow !== 'function' || session.openState !== 'cold') return false;
-        installSessionInstantOpenHook(session);
+        installSessionInstantOpenHook(session, manager);
         const installStartedAt = sessionPerformanceNow();
         session.installWindow(pageRes.value.records, Boolean(pageRes.value.hasMore));
         session.__dshAuPreloaded = {
@@ -6843,7 +6925,7 @@ window.__ModuleLoader__.load({
       if (manager && origManagerGet) {
         manager.get = function patchedManagerGet(sessionId, ...rest) {
           const session = origManagerGet.call(this, sessionId, ...rest);
-          return installSessionInstantOpenHook(session);
+          return installSessionInstantOpenHook(session, manager);
         };
       }
 
@@ -7144,6 +7226,11 @@ window.__ModuleLoader__.load({
     }
     // END resolveDevicePillStatus
 
+    function resolveDisconnectRemotesOnLock(snap) {
+      return (snap?.self?.features?.disconnectRemotesOnLock ?? snap?.features?.disconnectRemotesOnLock) === true;
+    }
+    // END resolveDisconnectRemotesOnLock
+
     function planScreenLockRemoteFrames({
       enabled,
       wasEnabled,
@@ -7349,7 +7436,7 @@ window.__ModuleLoader__.load({
         let stateDigest = '';
         if (typeof window !== 'undefined') {
           window.__dshAuLastStateSnap = snap;
-          disconnectOnLockRef.current = snap.features?.disconnectRemotesOnLock === true;
+          disconnectOnLockRef.current = resolveDisconnectRemotesOnLock(snap);
           // 同步锁屏状态，供同步 poll 守卫使用。
           const wasLocked = window.__dshAuSystemLocked === true;
           const isLocked = snap.systemLocked === true;
@@ -14226,8 +14313,12 @@ window.__ModuleLoader__.load({
                 const pinnedVal = store.pinnedSessionOverrides.has(ls.sessionId)
                   ? store.pinnedSessionOverrides.get(ls.sessionId)
                   : Boolean(ls.pinned || prev.pinned);
-                // 占位标题（未命名对话 / 空白会话的「新对话」）不得覆盖另一侧的真实标题
-                const isPlaceholderTitle = (s) => !s.title || s.title === '未命名对话' || (s.blank && s.title === '新对话');
+                // 占位标题（未命名对话 / 空白会话的「新对话」/ 工作区兜底目录名）不得覆盖另一侧的真实标题
+                const isPlaceholderTitle = (s) => {
+                  const t = String(s?.title || '').trim();
+                  const lower = t.toLowerCase();
+                  return !t || t === '未命名对话' || lower === 'default-workspace' || lower === 'default' || t === '默认工作区' || (s?.blank && t === '新对话');
+                };
                 const isConfirmedNonBlank = (s) => !s?.blank && (
                   !isPlaceholderTitle(s)
                   || Boolean(s?.summary && String(s.summary).trim())

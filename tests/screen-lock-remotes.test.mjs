@@ -31,6 +31,14 @@ function loadFramePlanner() {
   return new Function(`${source.slice(start, end)}\nreturn planScreenLockRemoteFrames;`)();
 }
 
+function loadDisconnectFlagResolver() {
+  const source = readFileSync(new URL('../client/src/11-shell.js', import.meta.url), 'utf8');
+  const start = source.indexOf('function resolveDisconnectRemotesOnLock');
+  const end = source.indexOf('// END resolveDisconnectRemotesOnLock');
+  assert.ok(start >= 0 && end > start, '壳层应包含锁屏断连开关读取函数');
+  return new Function(`${source.slice(start, end)}\nreturn resolveDisconnectRemotesOnLock;`)();
+}
+
 function portOpen(url) {
   return new Promise((resolve) => {
     let settled = false;
@@ -164,6 +172,15 @@ test('锁屏先记住已打开页面，解锁后只恢复已经重新连上的�
   assert.deepEqual(restored.ids, ['win']);
   assert.equal(restored.activeId, 'win');
   assert.equal(restored.suspended, null);
+});
+
+test('前端从 snap.self.features 读取锁屏断连开关并兼容旧格式', () => {
+  const resolveFlag = loadDisconnectFlagResolver();
+  assert.equal(resolveFlag({ self: { features: { disconnectRemotesOnLock: true } } }), true);
+  assert.equal(resolveFlag({ self: { features: { disconnectRemotesOnLock: false } } }), false);
+  assert.equal(resolveFlag({ features: { disconnectRemotesOnLock: true } }), true);
+  assert.equal(resolveFlag({ self: {} }), false);
+  assert.equal(resolveFlag(null), false);
 });
 
 test('会话监视器只把 locked / unlocked 当成锁屏变化', () => {

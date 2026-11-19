@@ -52,7 +52,12 @@
 
     async function syncControlledHostDefaultPreset(enabled, ctx = controlledClientCtx) {
       const targetPreset = enabled ? 'danger-full-access' : 'workspace-write';
-      const remoteSettings = ctx?.remote?.settings;
+      let remoteSettings = null;
+      try {
+        remoteSettings = ctx?.get?.('remote')?.settings || ctx?.remote?.settings || null;
+      } catch {
+        remoteSettings = null;
+      }
       if (remoteSettings && typeof remoteSettings.mutate === 'function') {
         try {
           await remoteSettings.mutate('permission', [
@@ -386,9 +391,16 @@
         const isCurrentActiveBlank = Boolean(row?.blank && currentSessionId && sid === currentSessionId);
         if (typeof sid !== 'string' || !sid || row?.origin === 'subagent' || (row?.blank && !isCurrentActiveBlank) || archivedSet.has(sid)) return null;
         const values = row?.projections?.values || row?.projectionValues || projectionsBySession[sid]?.values || {};
-        const rawTitle = (typeof values.title === 'string' && values.title.trim())
-          || (typeof row?.displayTitle === 'string' && row.displayTitle.trim())
-          || (typeof row?.title === 'string' && row.title.trim())
+        const pickRealTitle = (val) => {
+          if (typeof val !== 'string') return '';
+          const trimmed = val.trim();
+          const lower = trimmed.toLowerCase();
+          if (!trimmed || lower === 'default-workspace' || lower === 'default' || trimmed === '默认工作区') return '';
+          return trimmed;
+        };
+        const rawTitle = pickRealTitle(values.title)
+          || pickRealTitle(row?.displayTitle)
+          || pickRealTitle(row?.title)
           || (isCurrentActiveBlank ? '新对话' : '未命名对话');
         const title = sanitizeTextForSync(rawTitle);
         const cwd = sanitizeTextForSync(String(row?.cwd || row?.path || values.workingDirectory || fallbackPath || '').trim());
@@ -846,15 +858,32 @@
           const open = async (method, target) => {
             if (typeof uiWorkspace?.[method] !== 'function') return false;
             await awaitNavigation(navigation, () => uiWorkspace[method](target));
-            opened = true;
             if (method === 'openSession' && target === sid) {
+              let resident = sessionsSvc?.manager?.sessions?.get?.(sid);
+              const errMsg = String(resident?.openError?.message || resident?.openError || '');
+              if (resident?.openState === 'error' && /is released/i.test(errMsg) && !resident.__dshAuOpenRecovered) {
+                resident.__dshAuOpenRecovered = true;
+                try { delete resident.__dshAuPreloaded; } catch { resident.__dshAuPreloaded = null; }
+                try {
+                  if (typeof sessionsSvc?.manager?.sessions?.delete === 'function') {
+                    sessionsSvc.manager.sessions.delete(sid);
+                  }
+                } catch {}
+                await awaitNavigation(navigation, () => uiWorkspace[method](target));
+                resident = sessionsSvc?.manager?.sessions?.get?.(sid);
+              }
+              if (resident?.openState === 'error') {
+                throw resident.openError instanceof Error ? resident.openError : new Error('session-open-error');
+              }
+              opened = true;
               openedRequestedSession = true;
               // 已打开会话的 open() 不会再进入 doOpen；补发状态，避免外层误等 30 秒。
-              const resident = sessionsSvc?.manager?.sessions?.get?.(sid);
               if (resident?.openState === 'open' && resident.openPromise == null && typeof postControlledSessionMetric === 'function') {
                 postControlledSessionMetric('foreground-state', sid, { stage: 'already-open', result: 'open', generation: resident.openGeneration, elapsedMs: 0 });
               }
+              return true;
             }
+            opened = true;
             return true;
           };
           const runNavigation = async () => {

@@ -5,6 +5,11 @@
     }
     // END resolveDevicePillStatus
 
+    function resolveDisconnectRemotesOnLock(snap) {
+      return (snap?.self?.features?.disconnectRemotesOnLock ?? snap?.features?.disconnectRemotesOnLock) === true;
+    }
+    // END resolveDisconnectRemotesOnLock
+
     function planScreenLockRemoteFrames({
       enabled,
       wasEnabled,
@@ -210,7 +215,7 @@
         let stateDigest = '';
         if (typeof window !== 'undefined') {
           window.__dshAuLastStateSnap = snap;
-          disconnectOnLockRef.current = snap.features?.disconnectRemotesOnLock === true;
+          disconnectOnLockRef.current = resolveDisconnectRemotesOnLock(snap);
           // 同步锁屏状态，供同步 poll 守卫使用。
           const wasLocked = window.__dshAuSystemLocked === true;
           const isLocked = snap.systemLocked === true;

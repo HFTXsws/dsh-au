@@ -476,7 +476,7 @@
       return typeof window !== 'undefined' && typeof window.performance?.now === 'function' ? window.performance.now() : Date.now();
     }
 
-    function installSessionInstantOpenHook(session) {
+    function installSessionInstantOpenHook(session, manager = null) {
       if (!session || typeof session !== 'object' || typeof session.doOpen !== 'function' || session.__dshAuInstantOpenHooked) {
         return session;
       }
@@ -492,11 +492,43 @@
         });
         let stallTimer = null;
         trace('open-start', 'loading');
+        const tryRecoverReleasedRef = (error) => {
+          const msg = String(error?.message || error || this.openError?.message || this.openError || '');
+          if (!/is released/i.test(msg)) return null;
+          try { delete this.__dshAuPreloaded; } catch { this.__dshAuPreloaded = null; }
+          if (this.__dshAuReleasedRetried) return null;
+          this.__dshAuReleasedRetried = true;
+          trace('released-retry', 'retrying');
+          try {
+            if (manager?.sessions?.get?.(this.sessionId) === this && typeof manager.sessions?.delete === 'function') {
+              manager.sessions.delete(this.sessionId);
+              const fresh = typeof manager.get === 'function' ? manager.get(this.sessionId) : null;
+              if (fresh && fresh !== this) {
+                if (typeof fresh.open === 'function') return Promise.resolve(fresh.open());
+                if (typeof fresh.doOpen === 'function') return Promise.resolve(fresh.doOpen(fresh.openGeneration ?? generation, ...rest));
+              }
+            }
+          } catch {}
+          if (typeof this.resync === 'function') {
+            return Promise.resolve(this.resync());
+          }
+          return null;
+        };
         const finish = () => {
           if (stallTimer !== null && typeof clearTimeout === 'function') clearTimeout(stallTimer);
           if (generation !== this.openGeneration) return;
           const failed = this.openState === 'error';
-          if (this.openState === 'open') this.__dshAuStallRetried = false;
+          if (this.openState === 'open') {
+            this.__dshAuStallRetried = false;
+            this.__dshAuReleasedRetried = false;
+          }
+          if (failed && /is released/i.test(String(this.openError?.message || this.openError || ''))) {
+            const recovery = tryRecoverReleasedRef(this.openError);
+            if (recovery) {
+              recovery.catch(() => trace('released-retry-failed', 'error'));
+              return;
+            }
+          }
           if (hadPreloaded && failed) {
             this.openState = 'open';
             this.openError = null;
@@ -516,7 +548,15 @@
         }
         let promise;
         try { promise = origDoOpen.call(this, generation, ...rest); }
-        catch (error) { finish(); throw error; }
+        catch (error) {
+          const recovery = tryRecoverReleasedRef(error);
+          if (recovery) {
+            if (stallTimer !== null && typeof clearTimeout === 'function') clearTimeout(stallTimer);
+            return recovery;
+          }
+          finish();
+          throw error;
+        }
         if (hadPreloaded && this.openState === 'loading') {
           this.openState = 'open';
           this.openError = null;
@@ -524,7 +564,20 @@
           trace('window-ready', 'cached', { recordCount: this.__dshAuPreloaded.count || 0 });
         }
         trace('open-dispatched', this.openState, { syncMs: Math.max(0, sessionPerformanceNow() - startedAt) });
-        if (promise && typeof promise.finally === 'function') return promise.finally(finish);
+        if (promise && typeof promise.then === 'function') {
+          return promise.then(
+            (val) => { finish(); return val; },
+            (error) => {
+              const recovery = tryRecoverReleasedRef(error);
+              if (recovery) {
+                if (stallTimer !== null && typeof clearTimeout === 'function') clearTimeout(stallTimer);
+                return recovery;
+              }
+              finish();
+              throw error;
+            }
+          );
+        }
         finish();
         return promise;
       };
@@ -554,7 +607,7 @@
         if (signal?.aborted || !pageRes?.ok || !Array.isArray(pageRes.value?.records)) return false;
         const session = manager.get(entry.sessionId);
         if (!session || typeof session.installWindow !== 'function' || session.openState !== 'cold') return false;
-        installSessionInstantOpenHook(session);
+        installSessionInstantOpenHook(session, manager);
         const installStartedAt = sessionPerformanceNow();
         session.installWindow(pageRes.value.records, Boolean(pageRes.value.hasMore));
         session.__dshAuPreloaded = {
@@ -584,7 +637,7 @@
       if (manager && origManagerGet) {
         manager.get = function patchedManagerGet(sessionId, ...rest) {
           const session = origManagerGet.call(this, sessionId, ...rest);
-          return installSessionInstantOpenHook(session);
+          return installSessionInstantOpenHook(session, manager);
         };
       }
 
