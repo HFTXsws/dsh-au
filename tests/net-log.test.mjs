@@ -4,6 +4,7 @@ import http from 'node:http';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { hashLanPassword } from '../lib/lan-auth.js';
 
 // 每个测试文件在独立子进程运行；把诊断日志重定向到临时文件，避免污染真实 ~/.dsh/logs。
 const tempDir = mkdtempSync(join(tmpdir(), 'dsh-au-netlog-'));
@@ -38,10 +39,13 @@ test('lan-bridge logs aborted upstream requests but stays silent on fast ones', 
   });
   await new Promise((resolve) => mockLocalDsh.listen(0, '127.0.0.1', resolve));
   const dshPort = mockLocalDsh.address().port;
+  const lanPasswordHash = hashLanPassword('netlog-pass');
+  const headers = { authorization: `Basic ${Buffer.from('u:netlog-pass').toString('base64')}` };
   const bridge = createLanBridge({
     instanceId: 'au_netlog',
     preferredPort: 33990,
     getLanShareEnabled: () => true,
+    getLanPasswordHash: () => lanPasswordHash,
     getLocalDshTarget: () => ({ origin: `http://127.0.0.1:${dshPort}`, authUrl: `http://127.0.0.1:${dshPort}/?token=t` }),
     getStatus: () => ({ status: 'idle', runningCount: 0 }),
   });
@@ -49,14 +53,14 @@ test('lan-bridge logs aborted upstream requests but stays silent on fast ones', 
   try {
     clearLog();
     await new Promise((resolve, reject) => {
-      http.get(`http://127.0.0.1:${bridgePort}/fast`, { agent: false }, (res) => { res.resume(); res.on('end', resolve); }).on('error', reject);
+      http.get(`http://127.0.0.1:${bridgePort}/fast`, { agent: false, headers }, (res) => { res.resume(); res.on('end', resolve); }).on('error', reject);
     });
     await sleep(50);
     assert.equal(readEvents().length, 0, '快速正常请求不应写日志');
 
     // 调用方 300ms 后放弃，等价于对端探测超时。
     // agent:false 避免复用上一条 keep-alive 连接导致请求排队、根本没到达桥接层。
-    const req = http.get(`http://127.0.0.1:${bridgePort}/hang?token=secret`, { agent: false });
+    const req = http.get(`http://127.0.0.1:${bridgePort}/hang?token=secret`, { agent: false, headers });
     req.on('error', () => {});
     await sleep(300);
     req.destroy();

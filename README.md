@@ -42,6 +42,8 @@ node "$(git rev-parse --show-toplevel)/scripts/install-local.mjs" --profile desk
 - 控制入口只使用 Windows named pipe 或 Unix socket，不注册 HTTP 路由，不接受局域网和远端网页代发消息。
 - 每个 DSH profile 使用独立端点和随机令牌；请求编号用于防止超时重试或并发调用重复发送。
 - 本机状态保存在 `~/.dsh/dsh-au/client-control/`，不进入 Git；不会把 Codex 回复正文写进请求账本。
+- 局域网接入默认关闭，开启前必须先设置接入密码；本机只保存密码的加盐哈希，同一来源连续输错会被临时锁定。
+- 局域网接入走普通 HTTP，密码以 Basic Auth 传输，同网段可被抓包看到；仅在家庭、公司等可信网络中开启，公共网络请改用隧道等加密路线。
 
 ## 禁止 AI 新建目标
 

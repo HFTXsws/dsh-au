@@ -117,14 +117,47 @@
         ]));
     }
 
+    /** 设置/修改本机局域网接入密码；已设置时要求先输入当前密码。 */
+    function LanPasswordForm({ passwordSet, onSave, onDone }) {
+      const [current, setCurrent] = useState('');
+      const [next, setNext] = useState('');
+      const [confirm, setConfirm] = useState('');
+      const [err, setErr] = useState('');
+      const [saving, setSaving] = useState(false);
+      const submit = async (event) => {
+        event.preventDefault();
+        if (next !== confirm) { setErr('两次输入的新密码不一致'); return; }
+        setSaving(true);
+        try {
+          const result = await onSave({ currentPassword: current, password: next });
+          if (result?.ok === false) { setErr(result.error || '保存失败'); return; }
+          onDone();
+        } finally {
+          setSaving(false);
+        }
+      };
+      return h('form', { className: 'dsh-au-lan-password-form', onSubmit: submit, style: { display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '10px' } }, [
+        err ? h('div', { key: 'error', style: { color: '#f87171', fontSize: '12px' } }, err) : null,
+        passwordSet ? h('input', { key: 'current', className: 'dsh-au-input', type: 'password', autoComplete: 'current-password', placeholder: '当前密码', value: current, onChange: (event) => setCurrent(event.target.value) }) : null,
+        h('input', { key: 'next', className: 'dsh-au-input', type: 'password', autoComplete: 'new-password', placeholder: '新密码（至少 4 位）', value: next, onChange: (event) => setNext(event.target.value) }),
+        h('input', { key: 'confirm', className: 'dsh-au-input', type: 'password', autoComplete: 'new-password', placeholder: '再输一次新密码', value: confirm, onChange: (event) => setConfirm(event.target.value) }),
+        h('div', { key: 'actions', style: { display: 'flex', justifyContent: 'flex-end', gap: '8px' } }, [
+          h('button', { key: 'cancel', type: 'button', className: 'dsh-au-btn', onClick: onDone }, '取消'),
+          h('button', { key: 'save', type: 'submit', className: 'dsh-au-btn primary', disabled: saving }, saving ? '保存中...' : '保存密码'),
+        ]),
+      ]);
+    }
+
     /** 集中查看手动设备及其全部路径，并收纳本机局域网共享与扫描操作；密码不会进入列表。 */
-    function RemoteManagerModal({ devices, self, lanOn, scanning, onToggleLan, onDiscover, onClose, onEdit, onEditDevice, onAddDevice, onAddRoute, onSetLocal, currentConnections }) {
+    function RemoteManagerModal({ devices, self, lanOn, scanning, onToggleLan, onSaveLanPassword, onDiscover, onClose, onEdit, onEditDevice, onAddDevice, onAddRoute, onSetLocal, currentConnections }) {
       // 每个设备都有独立的当前通道；直接打开弹窗时也能显示可用路径标签。
       const currentRouteIds = currentConnections || resolveCurrentConnections(devices, self, typeof window === 'undefined' ? '' : window.location.href);
       // 本机只把原 LAN 行显示为「本机」，所有设备都不再单列 local / 回环入口。
       const visibleRoutes = (device) => (device.routes || []).filter((route) => route.kind !== 'local');
       const routeCount = devices.reduce((count, device) => count + visibleRoutes(device).length, 0);
       const [copiedRouteId, setCopiedRouteId] = useState('');
+      const [editingLanPassword, setEditingLanPassword] = useState(false);
+      const lanPasswordSet = Boolean(self?.lanPasswordSet);
       const renderRoute = (route, deviceStatus) => {
         const statusDiff = (route.status || 'unknown') !== deviceStatus;
         const routeUrl = route.originUrl || route.url || '';
@@ -182,12 +215,18 @@
                     h(LanIcon, { key: 'icon' }),
                     h('span', { key: 'text' }, '本机局域网接入'),
                   ]),
-                  h('span', { key: 'hint', className: 'dsh-au-remote-row-state' }, lanOn ? '已开启：同一局域网内能访问本机端口的人无需密码即可使用本机 DSH，请只在可信网络开启。' : '默认关闭；开启后局域网设备可通过“局域网”路径免密连接本机。'),
+                  h('span', { key: 'hint', className: 'dsh-au-remote-row-state' }, !lanPasswordSet
+                    ? '尚未设置接入密码；先设置密码才能开启局域网接入。'
+                    : (lanOn ? '已开启：局域网设备需在“局域网”路径里填写本机接入密码（账号随意）才能连接。' : '已关闭；开启后局域网设备凭接入密码连接本机。')),
                 ]),
                 h('span', { key: 'actions', className: 'dsh-au-lan-control-actions' }, [
-                  h('button', { key: 'toggle', type: 'button', className: `dsh-au-btn ${lanOn ? 'on' : 'off'}`, 'aria-pressed': lanOn, onClick: onToggleLan, title: `局域网接入：${lanOn ? '已开启' : '已关闭'}` }, lanOn ? '已开启' : '已关闭'),
+                  h('button', { key: 'password', type: 'button', className: 'dsh-au-btn', onClick: () => setEditingLanPassword((value) => !value), title: '设置或修改局域网接入密码' }, lanPasswordSet ? '修改密码' : '设置密码'),
+                  h('button', { key: 'toggle', disabled: !lanPasswordSet && !lanOn, type: 'button', className: `dsh-au-btn ${lanOn ? 'on' : 'off'}`, 'aria-pressed': lanOn, onClick: onToggleLan, title: `局域网接入：${lanOn ? '已开启' : '已关闭'}` }, lanOn ? '已开启' : '已关闭'),
                   h('button', { key: 'scan', type: 'button', className: 'dsh-au-btn', disabled: scanning, onClick: () => { void onDiscover(); }, title: scanning ? '正在扫描局域网' : '扫描局域网' }, scanning ? '扫描中...' : '扫描'),
                 ]),
+                editingLanPassword
+                  ? h(LanPasswordForm, { key: 'password-form', passwordSet: lanPasswordSet, onSave: onSaveLanPassword, onDone: () => setEditingLanPassword(false) })
+                  : null,
               ]),
               ...(devices.length
                 ? devices.map((device) => h(

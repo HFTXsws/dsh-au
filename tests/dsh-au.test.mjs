@@ -37,6 +37,7 @@ import { listConversationSummaries } from '../lib/session-reader.js';
 import { classifyRemoteTransport, createRemoteProxyPool } from '../lib/remote-proxy-pool.js';
 import { applyPluginPatchConfig, buildNpmInstallArgs, buildPnpmInvocation, DEFAULT_NPM_REGISTRY, findLocalLinkedDependencies, getNpmPackageScope, isLocalPluginAlreadyMounted, isNpmPluginAlreadyInstalled, resolveNpmRegistry, resolvePluginPatchId, summarizePnpmFailure, syncDshPlugins, withLocalLinkSpecs } from '../lib/plugin-sync-core.js';
 import { createLanBridge } from '../lib/lan-bridge.js';
+import { hashLanPassword } from '../lib/lan-auth.js';
 import {
   SERVICES_CATALOG,
   healthProbeCandidates,
@@ -245,7 +246,7 @@ test('client mounts a root-resident top bar and preserves remote iframe instance
   assert.match(client, /dsh-au-tab\.active \.dsh-au-badge/);
   assert.doesNotMatch(client, /编辑远程配置.*✎/);
   // 管理页直接渲染手动设备及其完整路径，并收纳本机局域网接入、扫描、新增设备和本机归属。
-  assert.match(client, /function RemoteManagerModal\(\{ devices, self, lanOn, scanning, onToggleLan, onDiscover,/);
+  assert.match(client, /function RemoteManagerModal\(\{ devices, self, lanOn, scanning, onToggleLan, onSaveLanPassword, onDiscover,/);
   assert.match(client, /function DeviceModal\(/);
   assert.match(client, /function RouteModal\(/);
   assert.match(client, /devices: allDevices/);
@@ -276,7 +277,7 @@ test('client mounts a root-resident top bar and preserves remote iframe instance
   assert.match(client, /\.dsh-au-remote-list \{ display:flex; flex:1 1 auto; flex-direction:column; min-height:0;.*overflow-y:auto/);
   // 滚动容器内的卡片禁止 shrink；局域网控制卡与路径行必须锁定盒模型、图标宽高与不换行标题。
   assert.match(client, /\.dsh-au-remote-device \{ flex:0 0 auto;/);
-  assert.match(client, /\.dsh-au-lan-control \{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:11px 14px;/);
+  assert.match(client, /\.dsh-au-lan-control \{ display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; padding:11px 14px;/);
   assert.match(client, /\.dsh-au-remote-row \{ box-sizing:border-box; width:100%;/);
   assert.match(client, /\.dsh-au-remote-row-name \{ display:inline-flex; align-items:center; gap:7px; font-size:13px; line-height:18px; font-weight:600; color:#f1f5f9; white-space:nowrap; \}/);
   assert.match(client, /\.dsh-au-remote-row-name svg \{ width:15px; height:15px; flex:0 0 15px;/);
@@ -1129,10 +1130,12 @@ test('lan-bridge exchanges local launch token cookie and respects lanShareEnable
   const dshPort = mockLocalDsh.address().port;
 
   let shareEnabled = true;
+  let passwordHash = '';
   const bridge = createLanBridge({
     instanceId: 'au_test1',
     preferredPort: 32990,
     getLanShareEnabled: () => shareEnabled,
+    getLanPasswordHash: () => passwordHash,
     getLocalDshTarget: () => ({
       origin: `http://127.0.0.1:${dshPort}`,
       authUrl: `http://127.0.0.1:${dshPort}/?token=launch_xyz`,
@@ -1150,13 +1153,26 @@ test('lan-bridge exchanges local launch token cookie and respects lanShareEnable
     assert.equal(pingBody.deviceId, 'win');
     assert.equal(pingBody.bridgePort, bridgePort);
 
-    const page = await httpGet(`http://127.0.0.1:${bridgePort}/chat`);
+    // 未设置密码：除自发现外一律拒绝，不能免密使用。
+    const noPassword = await httpGet(`http://127.0.0.1:${bridgePort}/chat`);
+    assert.equal(noPassword.status, 403);
+
+    passwordHash = hashLanPassword('lan-secret');
+    const missing = await httpGet(`http://127.0.0.1:${bridgePort}/chat`);
+    assert.equal(missing.status, 401);
+    assert.match(missing.headers['www-authenticate'] || '', /^Basic/);
+    const basic = (pwd) => ({ authorization: `Basic ${Buffer.from(`any:${pwd}`).toString('base64')}` });
+    const wrong = await httpGet(`http://127.0.0.1:${bridgePort}/chat`, basic('nope'));
+    assert.equal(wrong.status, 401);
+    assert.doesNotMatch(wrong.body, /local_dsh/);
+
+    const page = await httpGet(`http://127.0.0.1:${bridgePort}/chat`, basic('lan-secret'));
     assert.equal(page.status, 200);
     assert.equal(page.body, 'local_dsh:browser_session=valid_1');
 
     // 跳转接口会带出已保存的远端凭据，任何写法都不能经桥接访问。
     for (const blockedPath of ['/dsh-au/connect', '//dsh-au//connect/', '/dsh/DSH-AU/Connect', '/dsh-au/%63onnect', '/dsh-au/connect?x=1', '/dsh-au/%E0%A4%A']) {
-      const denied = await httpGet(`http://127.0.0.1:${bridgePort}${blockedPath}`);
+      const denied = await httpGet(`http://127.0.0.1:${bridgePort}${blockedPath}`, basic('lan-secret'));
       assert.equal(denied.status, 403, blockedPath);
       assert.doesNotMatch(denied.body, /local_dsh/, blockedPath);
     }

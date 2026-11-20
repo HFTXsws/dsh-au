@@ -5,6 +5,7 @@ import http from 'node:http';
 import { createHash } from 'node:crypto';
 import { createRemoteProxyPool } from '../lib/remote-proxy-pool.js';
 import { createLanBridge } from '../lib/lan-bridge.js';
+import { hashLanPassword } from '../lib/lan-auth.js';
 
 // P1 regression: a foreign local webpage must not borrow the proxy's Basic/Cookie session.
 async function listen(handler) {
@@ -234,14 +235,17 @@ test('LAN bridge rejects foreign Origins before auth bootstrap while keeping dir
   let bridge;
   let allowedOrigins = [];
   const calls = [];
+  const lanPasswordHash = hashLanPassword('bridge-pass');
+  const lanAuth = { authorization: `Basic ${Buffer.from('u:bridge-pass').toString('base64')}` };
   try {
     upstream = await listen((req, res) => {
-      calls.push({ path: req.url, cookie: req.headers.cookie });
+      calls.push({ path: req.url, cookie: req.headers.cookie, authorization: req.headers.authorization });
       if (req.url === '/bootstrap') res.setHeader('set-cookie', 'browser_session=lan-secret; SameSite=Strict');
       res.end('LAN business response');
     });
     bridge = createLanBridge({
       instanceId: 'security-test', preferredPort: 0, getLanShareEnabled: () => true,
+      getLanPasswordHash: () => lanPasswordHash,
       getLocalDshTarget: () => ({ origin: upstream.origin, authUrl: `${upstream.origin}/bootstrap` }),
       getAllowedOrigins: () => allowedOrigins,
       getStatus: () => ({ status: 'idle', runningCount: 0 }),
@@ -268,8 +272,10 @@ test('LAN bridge rejects foreign Origins before auth bootstrap while keeping dir
     assert.equal(calls.length, 0);
     for (const source of [mainLocalhost, registeredBridgeOrigin, 'https://registered-main.example',
       origin, `http://localhost:${port}`, `http://[::1]:${port}`, undefined, upstream.origin]) {
-      const response = await request(`${origin}/chat`, { headers: source ? { origin: source } : {} });
+      const response = await request(`${origin}/chat`, { headers: source ? { origin: source, ...lanAuth } : lanAuth });
       assert.equal(response.status, 200);
+      // 局域网接入密码只在桥接层校验，不转发给本机 DSH。
+      assert.equal(calls.at(-1).authorization, undefined);
       assertCors(response, source);
       assert.equal(calls.at(-1).cookie, 'browser_session=lan-secret');
     }

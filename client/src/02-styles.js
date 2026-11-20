@@ -109,7 +109,7 @@
         .dsh-au-remote-manager-actions { display:flex; align-items:center; gap:8px; flex-shrink:0; }
         .dsh-au-remote-list { display:flex; flex:1 1 auto; flex-direction:column; min-height:0; gap:12px; overflow-y:auto; overscroll-behavior:contain; padding:14px 16px; }
         .dsh-au-remote-device { flex:0 0 auto; border:1px solid #283142; border-radius:8px; background:#131722; overflow:hidden; }
-        .dsh-au-lan-control { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:11px 14px; background:#161b27; }
+        .dsh-au-lan-control { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; padding:11px 14px; background:#161b27; }
         .dsh-au-lan-control-main { display:flex; flex-direction:column; gap:3px; min-width:0; }
         .dsh-au-lan-control-actions { display:inline-flex; align-items:center; gap:8px; flex-shrink:0; }
         .dsh-au-remote-device-head { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 14px; background:#181e2c; border-bottom:1px solid #222a3a; }
@@ -128,6 +128,7 @@
         .dsh-au-remote-row-url { overflow:hidden; color:#94a3b8; font-size:12px; line-height:16px; font-family:Consolas,ui-monospace,monospace; text-overflow:ellipsis; white-space:nowrap; }
         .dsh-au-remote-row-state { color:#94a3b8; font-size:11.5px; line-height:16px; white-space:nowrap; }
         .dsh-au-lan-control-main .dsh-au-remote-row-state { white-space:normal; }
+        .dsh-au-lan-password-form { flex-basis:100%; }
         .dsh-au-remote-empty { padding:36px 16px; color:#94a3b8; text-align:center; font-size:12px; }
         .dsh-au-wb-modal { width:min(1056px,78vw); height:min(684px,88dvh); background:#11151e; border:1px solid #2c354d; border-radius:12px; box-shadow:0 20px 56px rgba(3,7,18,.75); display:flex; flex-direction:column; overflow:hidden; color:#f1f5f9; font-size:13.3px; }
         .dsh-au-wb-head { padding:10px 14px; border-bottom:1px solid #1f2637; background:#161b26; display:flex; align-items:center; justify-content:space-between; gap:10px; flex-shrink:0; }

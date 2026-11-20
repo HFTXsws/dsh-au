@@ -1049,7 +1049,21 @@
 
       const toggleLanShare = async () => {
         const next = !(state.self?.lanShareEnabled ?? true);
-        applySnap(await callApi('setLanShare', { enabled: next }));
+        try {
+          applySnap(await callApi('setLanShare', { enabled: next }));
+        } catch (error) {
+          window.alert(error.message);
+        }
+      };
+      const saveLanPassword = async (payload) => {
+        // 旧密码错误等 400 会抛错，转成表单可显示的错误。
+        try {
+          const snap = await callApi('setLanPassword', payload);
+          applySnap(snap);
+          return snap;
+        } catch (error) {
+          return { ok: false, error: error.message };
+        }
       };
       const handleSaveDevice = async (payload) => {
         const snap = await callApi('saveDevice', payload);
@@ -1309,6 +1323,7 @@
           lanOn,
           scanning,
           onToggleLan: toggleLanShare,
+          onSaveLanPassword: saveLanPassword,
           onDiscover: handleDiscover,
           onClose: () => setRemoteManager(false),
           onEdit: (route) => { setRemoteManager(false); setEditingRemote(route); },

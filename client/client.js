@@ -2262,7 +2262,7 @@ window.__ModuleLoader__.load({
         .dsh-au-remote-manager-actions { display:flex; align-items:center; gap:8px; flex-shrink:0; }
         .dsh-au-remote-list { display:flex; flex:1 1 auto; flex-direction:column; min-height:0; gap:12px; overflow-y:auto; overscroll-behavior:contain; padding:14px 16px; }
         .dsh-au-remote-device { flex:0 0 auto; border:1px solid #283142; border-radius:8px; background:#131722; overflow:hidden; }
-        .dsh-au-lan-control { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:11px 14px; background:#161b27; }
+        .dsh-au-lan-control { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; padding:11px 14px; background:#161b27; }
         .dsh-au-lan-control-main { display:flex; flex-direction:column; gap:3px; min-width:0; }
         .dsh-au-lan-control-actions { display:inline-flex; align-items:center; gap:8px; flex-shrink:0; }
         .dsh-au-remote-device-head { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 14px; background:#181e2c; border-bottom:1px solid #222a3a; }
@@ -2281,6 +2281,7 @@ window.__ModuleLoader__.load({
         .dsh-au-remote-row-url { overflow:hidden; color:#94a3b8; font-size:12px; line-height:16px; font-family:Consolas,ui-monospace,monospace; text-overflow:ellipsis; white-space:nowrap; }
         .dsh-au-remote-row-state { color:#94a3b8; font-size:11.5px; line-height:16px; white-space:nowrap; }
         .dsh-au-lan-control-main .dsh-au-remote-row-state { white-space:normal; }
+        .dsh-au-lan-password-form { flex-basis:100%; }
         .dsh-au-remote-empty { padding:36px 16px; color:#94a3b8; text-align:center; font-size:12px; }
         .dsh-au-wb-modal { width:min(1056px,78vw); height:min(684px,88dvh); background:#11151e; border:1px solid #2c354d; border-radius:12px; box-shadow:0 20px 56px rgba(3,7,18,.75); display:flex; flex-direction:column; overflow:hidden; color:#f1f5f9; font-size:13.3px; }
         .dsh-au-wb-head { padding:10px 14px; border-bottom:1px solid #1f2637; background:#161b26; display:flex; align-items:center; justify-content:space-between; gap:10px; flex-shrink:0; }
@@ -3777,14 +3778,47 @@ window.__ModuleLoader__.load({
         ]));
     }
 
+    /** 设置/修改本机局域网接入密码；已设置时要求先输入当前密码。 */
+    function LanPasswordForm({ passwordSet, onSave, onDone }) {
+      const [current, setCurrent] = useState('');
+      const [next, setNext] = useState('');
+      const [confirm, setConfirm] = useState('');
+      const [err, setErr] = useState('');
+      const [saving, setSaving] = useState(false);
+      const submit = async (event) => {
+        event.preventDefault();
+        if (next !== confirm) { setErr('两次输入的新密码不一致'); return; }
+        setSaving(true);
+        try {
+          const result = await onSave({ currentPassword: current, password: next });
+          if (result?.ok === false) { setErr(result.error || '保存失败'); return; }
+          onDone();
+        } finally {
+          setSaving(false);
+        }
+      };
+      return h('form', { className: 'dsh-au-lan-password-form', onSubmit: submit, style: { display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '10px' } }, [
+        err ? h('div', { key: 'error', style: { color: '#f87171', fontSize: '12px' } }, err) : null,
+        passwordSet ? h('input', { key: 'current', className: 'dsh-au-input', type: 'password', autoComplete: 'current-password', placeholder: '当前密码', value: current, onChange: (event) => setCurrent(event.target.value) }) : null,
+        h('input', { key: 'next', className: 'dsh-au-input', type: 'password', autoComplete: 'new-password', placeholder: '新密码（至少 4 位）', value: next, onChange: (event) => setNext(event.target.value) }),
+        h('input', { key: 'confirm', className: 'dsh-au-input', type: 'password', autoComplete: 'new-password', placeholder: '再输一次新密码', value: confirm, onChange: (event) => setConfirm(event.target.value) }),
+        h('div', { key: 'actions', style: { display: 'flex', justifyContent: 'flex-end', gap: '8px' } }, [
+          h('button', { key: 'cancel', type: 'button', className: 'dsh-au-btn', onClick: onDone }, '取消'),
+          h('button', { key: 'save', type: 'submit', className: 'dsh-au-btn primary', disabled: saving }, saving ? '保存中...' : '保存密码'),
+        ]),
+      ]);
+    }
+
     /** 集中查看手动设备及其全部路径，并收纳本机局域网共享与扫描操作；密码不会进入列表。 */
-    function RemoteManagerModal({ devices, self, lanOn, scanning, onToggleLan, onDiscover, onClose, onEdit, onEditDevice, onAddDevice, onAddRoute, onSetLocal, currentConnections }) {
+    function RemoteManagerModal({ devices, self, lanOn, scanning, onToggleLan, onSaveLanPassword, onDiscover, onClose, onEdit, onEditDevice, onAddDevice, onAddRoute, onSetLocal, currentConnections }) {
       // 每个设备都有独立的当前通道；直接打开弹窗时也能显示可用路径标签。
       const currentRouteIds = currentConnections || resolveCurrentConnections(devices, self, typeof window === 'undefined' ? '' : window.location.href);
       // 本机只把原 LAN 行显示为「本机」，所有设备都不再单列 local / 回环入口。
       const visibleRoutes = (device) => (device.routes || []).filter((route) => route.kind !== 'local');
       const routeCount = devices.reduce((count, device) => count + visibleRoutes(device).length, 0);
       const [copiedRouteId, setCopiedRouteId] = useState('');
+      const [editingLanPassword, setEditingLanPassword] = useState(false);
+      const lanPasswordSet = Boolean(self?.lanPasswordSet);
       const renderRoute = (route, deviceStatus) => {
         const statusDiff = (route.status || 'unknown') !== deviceStatus;
         const routeUrl = route.originUrl || route.url || '';
@@ -3842,12 +3876,18 @@ window.__ModuleLoader__.load({
                     h(LanIcon, { key: 'icon' }),
                     h('span', { key: 'text' }, '本机局域网接入'),
                   ]),
-                  h('span', { key: 'hint', className: 'dsh-au-remote-row-state' }, lanOn ? '已开启：同一局域网内能访问本机端口的人无需密码即可使用本机 DSH，请只在可信网络开启。' : '默认关闭；开启后局域网设备可通过“局域网”路径免密连接本机。'),
+                  h('span', { key: 'hint', className: 'dsh-au-remote-row-state' }, !lanPasswordSet
+                    ? '尚未设置接入密码；先设置密码才能开启局域网接入。'
+                    : (lanOn ? '已开启：局域网设备需在“局域网”路径里填写本机接入密码（账号随意）才能连接。' : '已关闭；开启后局域网设备凭接入密码连接本机。')),
                 ]),
                 h('span', { key: 'actions', className: 'dsh-au-lan-control-actions' }, [
-                  h('button', { key: 'toggle', type: 'button', className: `dsh-au-btn ${lanOn ? 'on' : 'off'}`, 'aria-pressed': lanOn, onClick: onToggleLan, title: `局域网接入：${lanOn ? '已开启' : '已关闭'}` }, lanOn ? '已开启' : '已关闭'),
+                  h('button', { key: 'password', type: 'button', className: 'dsh-au-btn', onClick: () => setEditingLanPassword((value) => !value), title: '设置或修改局域网接入密码' }, lanPasswordSet ? '修改密码' : '设置密码'),
+                  h('button', { key: 'toggle', disabled: !lanPasswordSet && !lanOn, type: 'button', className: `dsh-au-btn ${lanOn ? 'on' : 'off'}`, 'aria-pressed': lanOn, onClick: onToggleLan, title: `局域网接入：${lanOn ? '已开启' : '已关闭'}` }, lanOn ? '已开启' : '已关闭'),
                   h('button', { key: 'scan', type: 'button', className: 'dsh-au-btn', disabled: scanning, onClick: () => { void onDiscover(); }, title: scanning ? '正在扫描局域网' : '扫描局域网' }, scanning ? '扫描中...' : '扫描'),
                 ]),
+                editingLanPassword
+                  ? h(LanPasswordForm, { key: 'password-form', passwordSet: lanPasswordSet, onSave: onSaveLanPassword, onDone: () => setEditingLanPassword(false) })
+                  : null,
               ]),
               ...(devices.length
                 ? devices.map((device) => h(
@@ -8314,7 +8354,21 @@ window.__ModuleLoader__.load({
 
       const toggleLanShare = async () => {
         const next = !(state.self?.lanShareEnabled ?? true);
-        applySnap(await callApi('setLanShare', { enabled: next }));
+        try {
+          applySnap(await callApi('setLanShare', { enabled: next }));
+        } catch (error) {
+          window.alert(error.message);
+        }
+      };
+      const saveLanPassword = async (payload) => {
+        // 旧密码错误等 400 会抛错，转成表单可显示的错误。
+        try {
+          const snap = await callApi('setLanPassword', payload);
+          applySnap(snap);
+          return snap;
+        } catch (error) {
+          return { ok: false, error: error.message };
+        }
       };
       const handleSaveDevice = async (payload) => {
         const snap = await callApi('saveDevice', payload);
@@ -8574,6 +8628,7 @@ window.__ModuleLoader__.load({
           lanOn,
           scanning,
           onToggleLan: toggleLanShare,
+          onSaveLanPassword: saveLanPassword,
           onDiscover: handleDiscover,
           onClose: () => setRemoteManager(false),
           onEdit: (route) => { setRemoteManager(false); setEditingRemote(route); },
