@@ -2590,6 +2590,58 @@ window.__ModuleLoader__.load({
         .dsh-au-cloud-sync-compare-default { color:var(--dsw-alias-label-tertiary,#64748b); font-family:Consolas,ui-monospace,monospace; font-size:11.4px; text-decoration:line-through; text-decoration-color:rgba(148,163,184,0.4); }
         .dsh-au-cloud-sync-compare-current { color:#34d399; font-family:Consolas,ui-monospace,monospace; font-size:11.6px; font-weight:600; }
         .dsh-au-cloud-sync-compare-arrow { margin-right:5px; color:#60a5fa; font-weight:700; }
+        .dsh-au-cloud-sync-rowlist { flex-shrink:0; display:flex; flex-direction:column; border:1px solid var(--dsw-alias-border-l1,#262f40); border-radius:8px; background:rgba(255,255,255,0.015); overflow:hidden; }
+        .dsh-au-cloud-sync-row-item { display:flex; flex-direction:column; border-top:1px solid rgba(255,255,255,0.06); }
+        .dsh-au-cloud-sync-row-item:first-child { border-top:0; }
+        .dsh-au-cloud-sync-row-item.is-open { background:rgba(59,130,246,0.04); }
+        .dsh-au-cloud-sync-row { display:flex; align-items:center; gap:12px; padding:9px 14px; cursor:pointer; user-select:none; transition:background .15s; }
+        .dsh-au-cloud-sync-row:hover { background:rgba(59,130,246,0.07); }
+        .dsh-au-cloud-sync-row:focus-visible { outline:2px solid #3b82f6; outline-offset:-2px; }
+        .dsh-au-cloud-sync-row input[type="checkbox"] { width:16px; height:16px; margin:0; accent-color:#3b82f6; cursor:pointer; flex-shrink:0; }
+        .dsh-au-cloud-sync-row-name { display:flex; flex-direction:column; gap:2px; min-width:0; flex:1 1 auto; }
+        .dsh-au-cloud-sync-row-title { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:13.2px; font-weight:600; color:var(--dsw-alias-label-primary,#f1f5f9); }
+        .dsh-au-cloud-sync-row-tag { font-size:10.5px; font-weight:500; color:var(--dsw-alias-label-tertiary,#64748b); }
+        .dsh-au-cloud-sync-row-id { font-family:Consolas,ui-monospace,monospace; font-size:11px; color:var(--dsw-alias-label-tertiary,#64748b); overflow-wrap:anywhere; }
+        .dsh-au-cloud-sync-row-hint { font-size:11px; color:var(--dsw-alias-label-secondary,#94a3b8); }
+        .dsh-au-cloud-sync-row-status { flex-shrink:0; font-size:11.5px; color:var(--dsw-alias-label-tertiary,#64748b); }
+        .dsh-au-cloud-sync-row-status.is-diff { padding:1px 8px; border-radius:999px; font-size:11px; font-weight:600; color:#fbbf24; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.35); }
+        .dsh-au-cloud-sync-row-chevron { flex-shrink:0; width:14px; text-align:center; font-size:11px; color:var(--dsw-alias-label-tertiary,#64748b); transition:transform .15s; }
+        .dsh-au-cloud-sync-row-item.is-open .dsh-au-cloud-sync-row-chevron { transform:rotate(180deg); }
+        .dsh-au-cloud-sync-row-panel { display:flex; flex-direction:column; gap:8px; padding:4px 14px 12px 42px; background:rgba(9,13,22,0.55); border-top:1px solid rgba(255,255,255,0.05); }
+        .dsh-au-cloud-sync-row-profile { display:flex; align-items:center; gap:8px; padding-top:8px; }
+        .dsh-au-cloud-sync-seg { display:inline-flex; align-self:flex-start; margin-top:8px; padding:2px; gap:2px; border-radius:8px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08); }
+        .dsh-au-cloud-sync-seg-btn { padding:3px 12px; border:0; border-radius:6px; background:transparent; color:var(--dsw-alias-label-secondary,#94a3b8); font:inherit; font-size:11.8px; cursor:pointer; transition:background .15s, color .15s; }
+        .dsh-au-cloud-sync-seg-btn:hover { color:var(--dsw-alias-label-primary,#f8fafc); }
+        .dsh-au-cloud-sync-seg-btn.is-active { background:#3b82f6; color:#ffffff; font-weight:600; }
+        .dsh-au-cloud-sync-row-th, .dsh-au-cloud-sync-row-tr { display:grid; grid-template-columns:minmax(120px,1fr) minmax(110px,1fr) minmax(110px,1fr); gap:10px; }
+        .dsh-au-cloud-sync-row-th { padding:2px 0 4px; font-size:11px; font-weight:600; color:var(--dsw-alias-label-tertiary,#64748b); border-bottom:1px solid rgba(255,255,255,0.05); }
+        .dsh-au-cloud-sync-row-tr { align-items:baseline; padding:5px 0; font-size:12px; line-height:1.5; border-bottom:1px dashed rgba(255,255,255,0.04); }
+        .dsh-au-cloud-sync-row-tr:last-child { border-bottom:0; }
+        /* 方案 G：四列对照；本机与云端不同的单元格琥珀色，改过官方默认的细项左侧细条 */
+        /* 横向滚动：表格宽度至少撑满容器，内容更宽时整体滚动；单元格不换行，避免长值被挤成多行 */
+        .dsh-au-cloud-sync-row-scroll { overflow-x:auto; overflow-y:hidden; padding-bottom:4px; }
+        /* 表头与每一行共用同一套列宽：外层定义四列，行用 subgrid 继承，避免各行按自身内容算列宽导致错位 */
+        .dsh-au-cloud-sync-row-table { display:grid; grid-template-columns:minmax(170px,max-content) minmax(110px,max-content) minmax(160px,max-content) minmax(160px,1fr); column-gap:24px; min-width:100%; width:max-content; }
+        .dsh-au-cloud-sync-row-th.is-g, .dsh-au-cloud-sync-row-tr.is-g { grid-column:1 / -1; grid-template-columns:subgrid; column-gap:inherit; }
+        .dsh-au-cloud-sync-row-tr.is-g > span, .dsh-au-cloud-sync-row-th.is-g > span { white-space:nowrap; overflow-wrap:normal; }
+        .dsh-au-cloud-sync-row-tr.is-g { padding-left:8px; border-left:2px solid transparent; }
+        .dsh-au-cloud-sync-row-th.is-g { padding-left:10px; }
+        .dsh-au-cloud-sync-row-tr.is-changed { border-left-color:rgba(59,130,246,0.55); }
+        .dsh-au-cloud-sync-row-tr.is-cloud-diff { background:rgba(245,158,11,0.07); }
+        .dsh-au-cloud-sync-row-cell-val { color:var(--dsw-alias-label-primary,#e2e8f0); font-family:Consolas,ui-monospace,monospace; font-size:11.6px; overflow-wrap:anywhere; }
+        .dsh-au-cloud-sync-row-cell-val.is-diff { color:#fbbf24; font-weight:600; }
+        .dsh-au-cloud-sync-row-note { margin-top:10px; font-size:12px; line-height:1.6; color:var(--dsw-alias-label-secondary,#94a3b8); }
+        .dsh-au-cloud-sync-row-note.is-diff { color:#fbbf24; }
+        .dsh-au-cloud-sync-row-cell-label { color:var(--dsw-alias-label-secondary,#cbd5e1); font-weight:500; overflow-wrap:anywhere; }
+        /* 绿色 = 非官方名称：DSH 安装包界面里找不到对应中文，由 dsh-au 自行命名（悬停显示原始键名） */
+        .dsh-au-cloud-sync-row-cell-label.is-unofficial, .dsh-au-cloud-sync-row-title.is-unofficial { color:#34d399; }
+        .dsh-au-cloud-sync-row-legend { margin:0 0 8px; font-size:12px; color:var(--dsw-alias-label-tertiary,#94a3b8); } .dsh-au-cloud-sync-row-legend .is-unofficial { color:#34d399; margin-right:2px; }
+        .dsh-au-cloud-sync-row-cell-local { color:#fbbf24; font-family:Consolas,ui-monospace,monospace; font-size:11.6px; font-weight:600; overflow-wrap:anywhere; }
+        .dsh-au-cloud-sync-row-cell-ref { color:var(--dsw-alias-label-secondary,#94a3b8); font-family:Consolas,ui-monospace,monospace; font-size:11.6px; overflow-wrap:anywhere; }
+        .dsh-au-cloud-sync-row-cell-null { color:var(--dsw-alias-label-tertiary,#64748b); font-style:italic; }
+        .dsh-au-cloud-sync-row-empty { padding:8px 0 2px; font-size:12px; color:var(--dsw-alias-label-secondary,#94a3b8); }
+        .dsh-au-cloud-sync-row-divider { flex-shrink:0; margin:14px 0 6px; font-size:11.5px; font-weight:600; color:var(--dsw-alias-label-tertiary,#64748b); }
+        @media (prefers-reduced-motion: reduce) { .dsh-au-cloud-sync-row, .dsh-au-cloud-sync-row-chevron, .dsh-au-cloud-sync-seg-btn { transition:none; } }
         .dsh-au-cloud-sync-modal-status { flex-shrink:0; margin:0; padding:8px 20px; font-size:12px; line-height:1.45; border-top:1px solid var(--dsw-alias-border-l1,#262f40); }
         .dsh-au-cloud-sync-modal-status.is-success { background:rgba(16,185,129,0.1); color:#6ee7b7; border-top-color:rgba(16,185,129,0.28); }
         .dsh-au-cloud-sync-modal-status.is-error { background:rgba(239,68,68,0.12); color:#fca5a5; border-top-color:rgba(239,68,68,0.3); }
@@ -9257,7 +9309,7 @@ window.__ModuleLoader__.load({
         checked: features.blockGoalCreation,
         disabled: !features.loaded || features.busy,
         onToggle: () => { void saveGoalCreationFeature(!features.blockGoalCreation); },
-        hint: features.error || features.goalCreationError || '设置保存在这台电脑，对后续工具执行立即生效。',
+        hint: features.error || features.goalCreationError || '对后续工具执行立即生效；随 dsh-au 设置跨电脑同步。',
       });
     }
 
@@ -9817,68 +9869,22 @@ window.__ModuleLoader__.load({
       );
     }
 
-    /** 云端配置自动同步兜底项列表（与服务端 OFFICIAL_SYNC_ITEMS 5 大分类一致） */
+    /** 服务端未返回前的兜底同步项（与服务端 OFFICIAL_SYNC_ITEMS 的 8 个固定项一致；对比细节以服务端为准）。 */
     const FALLBACK_CLOUD_SYNC_ITEMS = [
-      {
-        id: 'general-settings',
-        category: '通用设置',
-        title: '外观字号、对话界面与用量显示',
-        defaultDiff: '字号 18/15/17 · 标准视图 · 详细性能统计 · 链接新标签页打开 · 紧凑用量 · 关闭日志上报',
-        comparisons: [
-          { label: '正文 / 代码 / 终端字号', defaultValue: '14 / 13 / 14 px', currentValue: '18 / 15 / 17 px' },
-          { label: '对话消息视图 (transcriptView)', defaultValue: '默认视图', currentValue: '标准视图 (standard)' },
-          { label: '性能与耗时统计 (performanceUsage)', defaultValue: '简略', currentValue: '详细统计 (detailed)' },
-          { label: '对话内链接打开方式 (linkOpening)', defaultValue: '当前窗口', currentValue: '新标签页打开 (new-tab)' },
-          { label: '账户用量显示样式 (usage)', defaultValue: '标准卡片', currentValue: '紧凑模式 (compact)' },
-          { label: '新手引导与官方会话日志上报', defaultValue: '开启引导 · 开启上报', currentValue: '跳过引导 · 关闭日志上报' },
-        ],
-      },
-      {
-        id: 'subagent-models',
-        category: '内置插件',
-        title: '子代理模型白名单',
-        defaultDiff: '从私人仓库同步子代理可用模型白名单',
-        comparisons: [
-          { label: '允许子代理独立选择模型', defaultValue: '关闭 (false)', currentValue: '开启 (true)' },
-          { label: '子代理可用模型白名单', defaultValue: '未限制（仅跟随主对话）', currentValue: '按私人仓库子代理白名单同步' },
-        ],
-      },
-      {
-        id: 'permission-preset',
-        category: 'Agent 预设',
-        title: '默认完全权限模式',
-        defaultDiff: '新开对话默认 danger-full-access（免除读写与命令二次确认）',
-        comparisons: [
-          { label: '新建对话默认权限预设 (defaultPreset)', defaultValue: '工作区内修改 (workspace-write，需审批)', currentValue: '完全权限 (danger-full-access，免确认)' },
-        ],
-      },
-      {
-        id: 'llm-providers',
-        category: '模型',
-        title: 'DSH 与 Codex 模型供应商、目录及默认模型',
-        defaultDiff: '从私人仓库同步模型供应商、目录与新对话默认模型',
-        comparisons: [
-          { label: 'DSH 模型供应商列表 (llm-pi-ai)', defaultValue: '无自定义供应商', currentValue: '按所选方案从私人仓库同步供应商列表' },
-          { label: 'Codex 模型目录', defaultValue: '不自动刷新', currentValue: '同步完整与精简目录，不切换当前模型' },
-          { label: '原生 ACP 代理适配器', defaultValue: '未配置', currentValue: '按所选方案同步 ACP 适配器' },
-          { label: '新对话默认模型 (agent-default-model)', defaultValue: '官方默认模型', currentValue: '按所选模型方案同步默认模型与思考强度' },
-        ],
-      },
-      {
-        id: 'desktop-preferences',
-        category: '桌面设置',
-        title: '桌面托盘、局域网与通知偏好',
-        defaultDiff: '关闭最小化到托盘 · 允许局域网与浏览器访问 · 仅通知回合与定时任务结果',
-        comparisons: [
-          { label: '点击窗口关闭按钮 (closeToTray)', defaultValue: '直接退出应用 (false)', currentValue: '最小化到系统托盘 (true)' },
-          { label: '网络暴露与浏览器访问', defaultValue: '仅本机访问 (local)', currentValue: '局域网访问 (lan) + 允许浏览器访问' },
-          { label: '系统桌面通知范围', defaultValue: '全部通知默认状态', currentValue: '开启对话回合与定时任务完成/失败通知，关闭后台作业通知' },
-        ],
-      },
+      { id: 'ui-theme', title: '外观：字号', patchIds: ['ui-theme'], comparisons: [] },
+      { id: 'ui-chat', title: '聊天内容展示', patchIds: ['ui-chat'], comparisons: [] },
+      { id: 'ui-settings-account', title: '账号设置界面', patchIds: ['ui-settings-account'], comparisons: [] },
+      { id: 'session-log-deepseek', title: '会话日志上传设置', patchIds: ['session-log-deepseek'], comparisons: [] },
+      { id: 'subagent-models', title: '子智能体：模型选择', patchIds: ['subagent-model-selection-settings'], comparisons: [] },
+      { id: 'permission-preset', title: '权限：新会话的默认权限模式', patchIds: ['permission'], comparisons: [] },
+      { id: 'llm-providers', title: '模型提供商、目录与默认模型', nonOfficial: true, patchIds: ['llm-pi-ai', 'dsh-acp-adapter', 'agent-default-model'], comparisons: [] },
+      { id: 'desktop-preferences', title: '桌面设置：后台运行、浏览器与局域网、桌面通知', patchIds: [], isDesktopPreferences: true, comparisons: [] },
     ];
 
     /** 云插件与配置兜底列表（与服务端 buildCloudPluginSyncItems 一致） */
     const FALLBACK_CLOUD_SYNC_PLUGINS = [];
+    /** 与服务端 FIXED_SYNC_PLUGIN_ID 一致：dsh-au 固定参与云同步，不提供勾选 */
+    const FIXED_SYNC_PLUGIN_ID = 'dsh-au';
 
     /** 本机设置兜底列表（与服务端 PREFERENCE_SYNC_ITEMS 一致） */
     const FALLBACK_PREFERENCE_ITEMS = [
@@ -9896,11 +9902,12 @@ window.__ModuleLoader__.load({
       },
     ];
 
+    // 内部 ID 与私有仓库的 cordis.patch.<id>.yml 文件名保持不变，只换显示名。
+    // generic 已不再提供；「工作」含本机 OneAPI 链路，仅 macOS 可选。
     const CLOUD_SYNC_PROFILE_OPTIONS = [
-      { id: 'kiro', label: 'kiro' },
-      { id: 'generic', label: 'generic' },
+      { id: 'kiro', label: '通用' },
       ...(typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || '')
-        ? [{ id: 'local', label: 'local' }]
+        ? [{ id: 'local', label: '工作' }]
         : []),
     ];
 
@@ -9944,6 +9951,181 @@ window.__ModuleLoader__.load({
       const fallback = FALLBACK_CLOUD_SYNC_ITEMS.find(f => f.id === item.id)
         || FALLBACK_CLOUD_SYNC_PLUGINS.find(f => f.id === item.id);
       return fallback?.comparisons || [];
+    }
+
+    /** 官方设置「方案 H」：统一取出细项，旧服务端无 fields 时回退到静态对比表（local 为 null）。 */
+    function resolveOfficialFields(item, profile) {
+      if (Array.isArray(item.fields) && item.fields.length > 0) return item.fields;
+      return resolveItemComparisons(item, profile).map(c => ({
+        label: c.label,
+        officialDefault: c.defaultValue ?? null,
+        local: null,
+        cloud: c.currentValue ?? null,
+      }));
+    }
+
+    function officialFieldsHaveLocal(fields) {
+      return fields.some(f => f.local !== null && f.local !== undefined);
+    }
+
+    /** 行右侧「与云 N 处不同」的 N：优先按细项 local 与 cloud 计数，缺数据时退回区块差异数。 */
+    function countOfficialCloudDiff(item, fields) {
+      if (officialFieldsHaveLocal(fields)) {
+        // 本机独有、云端没有的键（localOnly）与服务端 inSync 判定一致，不算差异。
+        const n = fields.filter(f => !f.localOnly && (f.local ?? null) !== (f.cloud ?? null)).length;
+        if (n > 0) return n;
+      }
+      return (Array.isArray(item.diffDetails) ? item.diffDetails.length : 0) || 1;
+    }
+
+    function officialFieldText(value, emptyText = '未设置') {
+      return value === null || value === undefined || value === ''
+        ? h('span', { className: 'dsh-au-cloud-sync-row-cell-null' }, emptyText)
+        : String(value);
+    }
+
+    /** 官方设置单行：勾选框、名称与 ID、状态，点击行展开四列对照（官方默认 / 本机 / 云端）。 */
+    function renderOfficialRow({ item, checked, busy, expanded, profile, onToggleCheck, onToggleExpand, onChangeProfile }) {
+      const fields = resolveOfficialFields(item, profile);
+      const hasLocal = officialFieldsHaveLocal(fields);
+      const inSync = item.inSync !== false;
+      const profileLabel = (CLOUD_SYNC_PROFILE_OPTIONS.find(o => o.id === profile) || {}).label || profile;
+      const idText = item.id === 'desktop-preferences'
+        ? 'desktop-preferences.json'
+        : ((Array.isArray(item.patchIds) && item.patchIds.length > 0 ? item.patchIds : [item.id]).join(' · '));
+      const diffN = countOfficialCloudDiff(item, fields);
+
+      const onRowKey = (e) => {
+        if (e.target !== e.currentTarget) return;
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggleExpand(item.id); }
+      };
+
+      // 方案 G：展开后四列对照（细项 / 官方默认 / 本机 / 云端）。
+      // 只列出有官方默认值的细项；没有记录官方默认的细项一律不显示（用户要求，避免满屏「未记录」）。
+      // 被隐藏的细项若与云端不同，在表格下方用一行提示，避免行上显示「与云 N 处不同」却在展开后找不到。
+      // 只有本机与云端不同的单元格标琥珀色，本机改了官方默认的细项用左侧细条提示。
+      const cloudTitle = `云端「${profileLabel}」`;
+      const hasOfficialDefault = (f) => f.officialDefault !== null && f.officialDefault !== undefined && f.officialDefault !== '';
+      // 模型项例外：只列出模型提供商（每个提供商一行，对应 DSH「模型」设置页），默认模型与 ACP 细项不列出。
+      const isProviderField = (f) => typeof f.key === 'string' && f.key.startsWith('llm-pi-ai.providers.');
+      const visibleFields = item.id === 'llm-providers'
+        ? fields.filter(isProviderField)
+        : fields.filter(hasOfficialDefault);
+      const hiddenCloudDiffs = fields.filter(f => !visibleFields.includes(f) && hasLocal && !f.localOnly && (f.local ?? null) !== (f.cloud ?? null));
+      let panelBody;
+      if (visibleFields.length === 0) {
+        panelBody = h('div', { className: 'dsh-au-cloud-sync-row-empty' }, '这一项没有记录官方默认值的细项。');
+      } else if (!hasLocal) {
+        panelBody = [
+          h('div', { key: 'note', className: 'dsh-au-cloud-sync-row-empty' }, '服务端版本较旧，暂时只能显示概要；重启 DSH 后可查看逐项对比。'),
+          h('div', { key: 'th', className: 'dsh-au-cloud-sync-row-th is-g' },
+            h('span', null, '细项'), h('span', null, '官方默认'), h('span', null, '本机'), h('span', null, cloudTitle)),
+          ...visibleFields.map((f, idx) => h('div', { key: idx, className: 'dsh-au-cloud-sync-row-tr is-g' },
+            h('span', { className: `dsh-au-cloud-sync-row-cell-label${f.nonOfficial ? ' is-unofficial' : ''}` }, f.label),
+            h('span', { className: 'dsh-au-cloud-sync-row-cell-ref' }, officialFieldText(f.officialDefault, '未记录')),
+            h('span', { className: 'dsh-au-cloud-sync-row-cell-ref' }, officialFieldText(null)),
+            h('span', { className: 'dsh-au-cloud-sync-row-cell-ref' }, officialFieldText(f.cloud)))),
+        ];
+      } else {
+        panelBody = [
+          h('div', { key: 'th', className: 'dsh-au-cloud-sync-row-th is-g' },
+            h('span', null, '细项'), h('span', null, '官方默认'), h('span', null, '本机'), h('span', null, cloudTitle)),
+          ...visibleFields.map((f, idx) => {
+            const cloudDiff = !f.localOnly && (f.local ?? null) !== (f.cloud ?? null);
+            const changedOfficial = f.officialDefault !== null && f.officialDefault !== undefined && (f.local ?? null) !== f.officialDefault;
+            return h('div', { key: f.key || idx, className: `dsh-au-cloud-sync-row-tr is-g${cloudDiff ? ' is-cloud-diff' : ''}${changedOfficial ? ' is-changed' : ''}` },
+              // 绿色 = 非官方名称：DSH 界面里找不到对应叫法，由 dsh-au 自行起名，悬停可看原始键名。
+              h('span', { className: `dsh-au-cloud-sync-row-cell-label${f.nonOfficial ? ' is-unofficial' : ''}`, title: f.nonOfficial ? `非官方名称（${f.key || ''}）` : (f.key || undefined) }, f.label),
+              h('span', { className: 'dsh-au-cloud-sync-row-cell-ref' }, officialFieldText(f.officialDefault, '未记录')),
+              h('span', { className: `dsh-au-cloud-sync-row-cell-val${cloudDiff ? ' is-diff' : ''}` }, officialFieldText(f.local)),
+              h('span', { className: `dsh-au-cloud-sync-row-cell-val${cloudDiff ? ' is-diff' : ''}` }, f.localOnly ? '（本机独有，不参与同步对比）' : officialFieldText(f.cloud)));
+          }),
+        ];
+      }
+      // 表格放进横向滚动容器：列宽按内容撑开不换行，窄窗口时左右滚动而不是挤压成多行。
+      panelBody = h('div', { key: 'scroll', className: 'dsh-au-cloud-sync-row-scroll' },
+        h('div', { className: 'dsh-au-cloud-sync-row-table' }, panelBody));
+      if (hiddenCloudDiffs.length > 0) {
+        panelBody = [].concat(panelBody, h('div', {
+          key: 'hidden-diff',
+          className: 'dsh-au-cloud-sync-row-note is-diff',
+          title: hiddenCloudDiffs.map(f => f.key || f.label).join('\n'),
+        }, `另有 ${hiddenCloudDiffs.length} 处没有官方默认值的细项与云端不同（未列出）：${hiddenCloudDiffs.slice(0, 3).map(f => f.label).join('、')}${hiddenCloudDiffs.length > 3 ? ' 等' : ''}`));
+      }
+      if (item.id === 'llm-providers') {
+        panelBody = [].concat(panelBody, h('div', { key: 'codex', className: 'dsh-au-cloud-sync-row-note' },
+          '勾选后还会同步 Codex CLI 的模型目录（完整与精简两份）。dsh-acp-adapter 让 DSH 通过 ACP 使用 Cursor Agent 等外部模型，和默认模型互相引用，所以一起同步。'));
+      }
+
+      return h(
+        'div',
+        { key: item.id, className: `dsh-au-cloud-sync-row-item${expanded ? ' is-open' : ''}` },
+        h(
+          'div',
+          {
+            className: 'dsh-au-cloud-sync-row',
+            role: 'button',
+            tabIndex: 0,
+            'aria-expanded': expanded,
+            onClick: () => onToggleExpand(item.id),
+            onKeyDown: onRowKey,
+          },
+          h('input', {
+            type: 'checkbox',
+            checked,
+            disabled: busy,
+            'aria-label': `同步 ${item.title}`,
+            onClick: (e) => e.stopPropagation(),
+            onChange: () => onToggleCheck(item.id),
+          }),
+          h(
+            'div',
+            { className: 'dsh-au-cloud-sync-row-name' },
+            h(
+              'span',
+              // 同步项标题同样用绿色表示非官方名称，替代原来的「非官方名称」小标签。
+              { className: `dsh-au-cloud-sync-row-title${item.nonOfficial ? ' is-unofficial' : ''}`, title: item.nonOfficial ? '非官方名称：DSH 界面里没有对应叫法' : undefined },
+              item.title,
+              null
+            ),
+            h('span', { className: 'dsh-au-cloud-sync-row-id' }, idText),
+            item.id === 'llm-providers'
+              ? h('span', { className: 'dsh-au-cloud-sync-row-hint' }, item.groupNote || '与 Cursor ACP 适配器、默认模型一起同步')
+              : null
+          ),
+          inSync
+            ? h('span', { className: 'dsh-au-cloud-sync-row-status' }, '与云一致')
+            : h('span', {
+                className: 'dsh-au-cloud-sync-row-status is-diff',
+                title: Array.isArray(item.diffDetails) && item.diffDetails.length > 0 ? `差异区块：${item.diffDetails.join('、')}` : undefined,
+              }, `与云 ${diffN} 处不同`),
+          h('span', { className: 'dsh-au-cloud-sync-row-chevron', 'aria-hidden': 'true' }, '▾')
+        ),
+        expanded
+          ? h(
+              'div',
+              { className: 'dsh-au-cloud-sync-row-panel' },
+              item.id === 'llm-providers'
+                ? h(
+                    'div',
+                    { className: 'dsh-au-cloud-sync-row-profile' },
+                    h('span', { className: 'dsh-au-cloud-sync-profile-label' }, '模型方案：'),
+                    h(
+                      'select',
+                      {
+                        className: 'dsh-au-cloud-sync-profile-select',
+                        value: profile,
+                        disabled: busy,
+                        onChange: (e) => onChangeProfile(e.target.value),
+                      },
+                      CLOUD_SYNC_PROFILE_OPTIONS.map(opt => h('option', { key: opt.id, value: opt.id }, opt.label))
+                    )
+                  )
+                : null,
+              panelBody
+            )
+          : null
+      );
     }
 
     /** 按键排序序列化，用于前端即时对比本机与云端 JSON 配置是否一致。 */
@@ -9996,7 +10178,7 @@ window.__ModuleLoader__.load({
     /** 云端同步独立弹窗：双 Tab（DSH 官方设置 | 云插件与配置）、勾选启用状态与配置、展开对比 */
     function CloudSyncModal({ isOpen, onClose, cloudSync, items, itemsByProfile, pluginItems, preferenceItems, machineId, onSave, onSaveAndSync, onPushToRepo, onSyncSinglePlugin, busy, message }) {
       const [activeTab, setActiveTab] = useState('official');
-      const [profile, setProfile] = useState(cloudSync.profile || 'generic');
+      const [profile, setProfile] = useState(cloudSync.profile || 'kiro');
       const [preferenceMap, setPreferenceMap] = useState(() => {
         const initial = {};
         for (const id of (cloudSync.selectedPreferences || FALLBACK_PREFERENCE_ITEMS.map(i => i.id))) initial[id] = true;
@@ -10021,7 +10203,7 @@ window.__ModuleLoader__.load({
 
       useEffect(() => {
         if (!isOpen) return;
-        setProfile(cloudSync.profile || 'generic');
+        setProfile(cloudSync.profile || 'kiro');
         const nextItems = {};
         for (const id of (cloudSync.selectedItems || [])) nextItems[id] = true;
         setSelectedMap(nextItems);
@@ -10061,9 +10243,14 @@ window.__ModuleLoader__.load({
         : null;
       const allList = profileItems || (items && items.length > 0 ? items : FALLBACK_CLOUD_SYNC_ITEMS);
       const allPluginList = Array.isArray(pluginItems) ? pluginItems : FALLBACK_CLOUD_SYNC_PLUGINS;
+      // dsh-au 固定参与同步，单独放在「dsh-au 设置」页签；「其它云插件」页签不再列出它。
+      const dshAuPluginItem = allPluginList.find(item => item.id === FIXED_SYNC_PLUGIN_ID) || null;
+      const otherPluginList = allPluginList.filter(item => item.id !== FIXED_SYNC_PLUGIN_ID);
       const isPluginTab = activeTab === 'plugins';
-      const activeList = isPluginTab ? allPluginList : allList;
-      const allExpanded = activeList.every(item => Boolean(expandedMap[item.id]));
+      const isDshAuTab = activeTab === 'dshau';
+      const activeList = isPluginTab ? otherPluginList : [];
+      const fixedOfficialList = allList.filter(item => !item.dynamic);
+      const dynamicOfficialList = allList.filter(item => item.dynamic);
 
       const handleToggle = (id) => {
         if (isPluginTab) {
@@ -10081,19 +10268,11 @@ window.__ModuleLoader__.load({
         setExpandedMap(prev => ({ ...prev, [id]: !prev[id] }));
       };
 
-      const handleToggleExpandAll = () => {
-        const next = { ...expandedMap };
-        for (const item of activeList) {
-          if (allExpanded) delete next[item.id];
-          else next[item.id] = true;
-        }
-        setExpandedMap(next);
-      };
 
       const handleSelectAll = () => {
         if (isPluginTab) {
           const next = {};
-          for (const item of allPluginList) next[item.id] = true;
+          for (const item of otherPluginList) next[item.id] = true;
           setSelectedPluginsMap(next);
         } else {
           const next = {};
@@ -10111,19 +10290,32 @@ window.__ModuleLoader__.load({
       };
 
       const currentSelectedItems = allList.filter(item => selectedMap[item.id]).map(item => item.id);
-      const currentSelectedPlugins = allPluginList.filter(item => selectedPluginsMap[item.id]).map(item => item.id);
+      const currentSelectedPlugins = allPluginList
+        .filter(item => item.id === FIXED_SYNC_PLUGIN_ID || selectedPluginsMap[item.id])
+        .map(item => item.id);
       const preferenceList = preferenceItems && preferenceItems.length > 0 ? preferenceItems : FALLBACK_PREFERENCE_ITEMS;
       const currentSelectedPreferences = preferenceList.filter(item => preferenceMap[item.id]).map(item => item.id);
       const prefDiffItems = preferenceList.filter(item => item.inSync === false);
       const officialDiffItems = allList.filter(item => item.inSync === false);
       const pluginDiffItems = allPluginList.filter(item => item.inSync === false);
-      const officialTabDiffCount = prefDiffItems.length + officialDiffItems.length;
-      const pluginTabDiffCount = pluginDiffItems.length;
+      const officialTabDiffCount = officialDiffItems.length;
+      const dshAuTabDiffCount = prefDiffItems.length + (dshAuPluginItem && dshAuPluginItem.inSync === false ? 1 : 0);
+      const pluginTabDiffCount = otherPluginList.filter(item => item.inSync === false).length;
       const totalDiffItems = [...prefDiffItems, ...officialDiffItems, ...pluginDiffItems];
       const totalDiffCount = totalDiffItems.length;
       const diffTitleSummary = totalDiffItems.slice(0, 3).map(item => item.title).join('、')
         + (totalDiffCount > 3 ? ` 等 ${totalDiffCount} 项` : '');
       const togglePreference = (id) => setPreferenceMap(prev => ({ ...prev, [id]: !prev[id] }));
+      const renderRowFor = (item) => renderOfficialRow({
+        item,
+        checked: Boolean(selectedMap[item.id]),
+        busy,
+        expanded: Boolean(expandedMap[item.id]),
+        profile,
+        onToggleCheck: handleToggle,
+        onToggleExpand: handleToggleExpand,
+        onChangeProfile: setProfile,
+      });
       const buildPayload = () => ({
         profile,
         selectedItems: currentSelectedItems,
@@ -10150,7 +10342,9 @@ window.__ModuleLoader__.load({
               h('h3', null, '自定义云端同步设置项'),
               h('p', null, isPluginTab
                 ? '勾选需要实时同步的云插件（勾选后自动同步该插件的安装、启用状态与插件配置）。'
-                : `当前设备：${machineId || '未识别'} · 以下仅列出与 DSH 官方默认设置不同的配置项，点击任意卡片可展开查看默认与当前对比。`)
+                : isDshAuTab
+                  ? 'dsh-au 自身配置固定参与云同步，无需勾选：上半部分所有电脑共用一份，下半部分每台电脑各存一份。'
+                  : `当前设备：${machineId || '未识别'} · 勾选需要同步的官方设置，点击任意一行可展开查看本机与云端、官方默认的差异。`)
             ),
             h(
               'button',
@@ -10189,11 +10383,25 @@ window.__ModuleLoader__.load({
                 {
                   type: 'button',
                   role: 'tab',
+                  'aria-selected': isDshAuTab,
+                  className: `dsh-au-cloud-sync-tab${isDshAuTab ? ' is-active' : ''}`,
+                  onClick: () => setActiveTab('dshau'),
+                },
+                'dsh-au 设置',
+                dshAuTabDiffCount > 0
+                  ? h('span', { className: 'dsh-au-cloud-sync-tab-badge' }, `${dshAuTabDiffCount} 项不一致`)
+                  : null
+              ),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  role: 'tab',
                   'aria-selected': isPluginTab,
                   className: `dsh-au-cloud-sync-tab${isPluginTab ? ' is-active' : ''}`,
                   onClick: () => setActiveTab('plugins'),
                 },
-                `云插件与配置 (${currentSelectedPlugins.length}/${allPluginList.length})`,
+                `其它云插件 (${otherPluginList.filter(item => selectedPluginsMap[item.id]).length}/${otherPluginList.length})`,
                 pluginTabDiffCount > 0
                   ? h('span', { className: 'dsh-au-cloud-sync-tab-badge' }, `${pluginTabDiffCount} 项不一致`)
                   : null
@@ -10202,15 +10410,8 @@ window.__ModuleLoader__.load({
             h(
               'div',
               { className: 'dsh-au-cloud-sync-bulk-actions' },
-              !isPluginTab
-                ? h(
-                    'button',
-                    { type: 'button', className: 'dsh-au-btn', disabled: busy, onClick: handleToggleExpandAll },
-                    allExpanded ? '全部收起' : '全部展开对比'
-                  )
-                : null,
-              h('button', { type: 'button', className: 'dsh-au-btn', disabled: busy, onClick: handleSelectAll }, '全选'),
-              h('button', { type: 'button', className: 'dsh-au-btn', disabled: busy, onClick: handleDeselectAll }, '全不选')
+              isDshAuTab ? null : h('button', { type: 'button', className: 'dsh-au-btn', disabled: busy, onClick: handleSelectAll }, '全选'),
+              isDshAuTab ? null : h('button', { type: 'button', className: 'dsh-au-btn', disabled: busy, onClick: handleDeselectAll }, '全不选')
             )
           ),
           totalDiffCount > 0
@@ -10223,11 +10424,42 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { className: 'dsh-au-cloud-sync-list' },
-            !isPluginTab
+            isDshAuTab
               ? h(
                   'div',
                   { className: 'dsh-au-cloud-sync-pref-section' },
-                  h('p', { className: 'dsh-au-cloud-sync-pref-title' }, '本机设置（按电脑各存一份，互不覆盖）'),
+                  h('p', { className: 'dsh-au-cloud-sync-pref-title' }, '所有电脑共用（固定同步）'),
+                  h(
+                    'div',
+                    { className: `dsh-au-cloud-sync-item is-checked${dshAuPluginItem && dshAuPluginItem.inSync === false ? ' is-diff' : ''}` },
+                    h(
+                      'div',
+                      { className: 'dsh-au-cloud-sync-item-main', style: { alignItems: 'center' } },
+                      h(
+                        'div',
+                        { className: 'dsh-au-cloud-sync-item-body' },
+                        h(
+                          'div',
+                          { className: 'dsh-au-cloud-sync-item-head' },
+                          h('span', { className: 'dsh-au-cloud-sync-item-cat' }, '自研插件'),
+                          h('span', { className: 'dsh-au-cloud-sync-item-title' }, 'dsh-au 版本与开关'),
+                          dshAuPluginItem
+                            ? h(
+                                'span',
+                                { className: `dsh-au-cloud-sync-diff-badge ${dshAuPluginItem.inSync === false ? 'is-diff' : 'is-sync'}` },
+                                dshAuPluginItem.diffLabel || (dshAuPluginItem.inSync === false ? '有差异' : '✓ 与云一致')
+                              )
+                            : h('span', { className: 'dsh-au-cloud-sync-diff-badge is-diff' }, '云清单暂无 dsh-au')
+                        ),
+                        h(
+                          'span',
+                          { className: 'dsh-au-cloud-sync-item-diff' },
+                          '版本 · 启用状态 · 启动时还原窗口 · 新开对话默认完全权限 · 禁止 AI 新建目标 · 智能恢复与自动续跑'
+                        )
+                      )
+                    )
+                  ),
+                  h('p', { className: 'dsh-au-cloud-sync-pref-title' }, '每台电脑各存一份（互不覆盖）'),
                   preferenceList.map(item => {
                     const jump = PREFERENCE_JUMPS[item.id];
                     const prefInSync = item.inSync !== false;
@@ -10293,6 +10525,27 @@ window.__ModuleLoader__.load({
                     )
                   );
                   })
+                )
+              : null,
+            activeTab === 'official'
+              ? h(
+                  React.Fragment,
+                  null,
+                  // 图例：绿色名称不是 DSH 官方叫法，避免用户误以为能在 DSH 设置页搜到。
+                  h('p', { className: 'dsh-au-cloud-sync-row-legend' },
+                    h('span', { className: 'is-unofficial' }, '绿色名称'),
+                    '为非官方名称：DSH 界面里没有对应叫法，悬停可查看原始配置键。'),
+                  h(
+                    'div',
+                    { className: 'dsh-au-cloud-sync-rowlist' },
+                    fixedOfficialList.map(renderRowFor)
+                  ),
+                  dynamicOfficialList.length > 0
+                    ? [
+                        h('div', { key: 'divider', className: 'dsh-au-cloud-sync-row-divider' }, '未分类的官方设置（新发现，默认不同步）'),
+                        h('div', { key: 'dynamic', className: 'dsh-au-cloud-sync-rowlist' }, dynamicOfficialList.map(renderRowFor)),
+                      ]
+                    : null
                 )
               : null,
             activeList.map(item => {
@@ -10380,126 +10633,7 @@ window.__ModuleLoader__.load({
                   )
                 );
               }
-              const expanded = Boolean(expandedMap[item.id]);
-              const isModelItem = item.id === 'llm-providers';
-              const comparisons = resolveItemComparisons(item, profile);
-              const officialInSync = item.inSync !== false;
-              const officialDiffLabel = item.diffLabel || (officialInSync ? '✓ 与云一致' : '本地与云不一致');
-              const officialDiffDetails = Array.isArray(item.diffDetails) ? item.diffDetails : [];
-              return h(
-                'div',
-                {
-                  key: item.id,
-                  className: `dsh-au-cloud-sync-item${checked ? ' is-checked' : ''}${expanded ? ' is-expanded' : ''}${!officialInSync ? ' is-diff' : ''}`,
-                },
-                h(
-                  'div',
-                  {
-                    className: 'dsh-au-cloud-sync-item-main',
-                    onClick: () => handleToggleExpand(item.id),
-                  },
-                  h('input', {
-                    type: 'checkbox',
-                    checked,
-                    disabled: busy,
-                    onClick: (e) => e.stopPropagation(),
-                    onChange: () => handleToggle(item.id),
-                  }),
-                  h(
-                    'div',
-                    { className: 'dsh-au-cloud-sync-item-body' },
-                    h(
-                      'div',
-                      { className: 'dsh-au-cloud-sync-item-head' },
-                      h('span', { className: 'dsh-au-cloud-sync-item-cat' }, item.category || '设置'),
-                      h('span', { className: 'dsh-au-cloud-sync-item-title' }, item.title),
-                      item.inSync !== undefined
-                        ? h(
-                            'span',
-                            {
-                              className: `dsh-au-cloud-sync-diff-badge ${officialInSync ? 'is-sync' : 'is-diff'}`,
-                              title: officialDiffDetails.length > 0 ? `差异区块：${officialDiffDetails.join('、')}` : undefined,
-                            },
-                            officialDiffLabel
-                          )
-                        : null,
-                      h('span', { className: 'dsh-au-cloud-sync-item-count' }, `${comparisons.length} 项对比`),
-                      isModelItem
-                        ? h(
-                            'span',
-                            {
-                              className: 'dsh-au-cloud-sync-profile-picker',
-                              onClick: (e) => { e.preventDefault(); e.stopPropagation(); },
-                            },
-                            h('span', { className: 'dsh-au-cloud-sync-profile-label' }, '模型方案：'),
-                            h(
-                              'select',
-                              {
-                                className: 'dsh-au-cloud-sync-profile-select',
-                                value: profile,
-                                disabled: busy,
-                                onClick: (e) => e.stopPropagation(),
-                                onChange: (e) => setProfile(e.target.value),
-                              },
-                              CLOUD_SYNC_PROFILE_OPTIONS.map(opt =>
-                                h('option', { key: opt.id, value: opt.id }, opt.label)
-                              )
-                            )
-                          )
-                        : null,
-                      h(
-                        'button',
-                        {
-                          type: 'button',
-                          className: 'dsh-au-cloud-sync-expand-btn',
-                          onClick: (e) => { e.stopPropagation(); handleToggleExpand(item.id); },
-                          'aria-expanded': expanded,
-                        },
-                        expanded ? '收起 ▴' : '展开对比 ▾'
-                      )
-                    ),
-                    !expanded && item.defaultDiff
-                      ? h('span', { className: 'dsh-au-cloud-sync-item-diff' }, item.defaultDiff)
-                      : null
-                  )
-                ),
-                expanded && comparisons.length > 0
-                  ? h(
-                      'div',
-                      { className: 'dsh-au-cloud-sync-compare-box' },
-                      !officialInSync
-                        ? h(
-                            'div',
-                            { className: 'dsh-au-cloud-sync-compare-diff-note' },
-                            officialDiffDetails.length > 0
-                              ? `本地与当前云端配置不一致（差异区块：${officialDiffDetails.join('、')}）`
-                              : '本地实际配置与当前云端配置不一致，可选择「本地推送到云」或「保存并云同步到本地」。'
-                          )
-                        : null,
-                      h(
-                        'div',
-                        { className: 'dsh-au-cloud-sync-compare-header' },
-                        h('span', null, '设置细项'),
-                        h('span', null, '官方默认'),
-                        h('span', null, '当前云端配置')
-                      ),
-                      comparisons.map((row, idx) =>
-                        h(
-                          'div',
-                          { key: idx, className: 'dsh-au-cloud-sync-compare-row' },
-                          h('span', { className: 'dsh-au-cloud-sync-compare-label' }, row.label),
-                          h('span', { className: 'dsh-au-cloud-sync-compare-default' }, row.defaultValue),
-                          h(
-                            'span',
-                            { className: 'dsh-au-cloud-sync-compare-current' },
-                            h('span', { className: 'dsh-au-cloud-sync-compare-arrow' }, '→'),
-                            row.currentValue
-                          )
-                        )
-                      )
-                    )
-                  : null
-              );
+              return null;
             })
           ),
           message
@@ -10565,7 +10699,7 @@ window.__ModuleLoader__.load({
     function CloudSyncFeatureGroup() {
       const [cloudSync, setCloudSync] = useState({
         enabled: false,
-        profile: 'generic',
+        profile: 'kiro',
         selectedItems: FALLBACK_CLOUD_SYNC_ITEMS.map(i => i.id),
         customized: false,
         selectedPlugins: FALLBACK_CLOUD_SYNC_PLUGINS.map(p => p.id),

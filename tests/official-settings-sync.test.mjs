@@ -15,6 +15,7 @@ import {
   buildPreferenceSyncItems,
   computeOfficialSettingsHash,
   normalizeCloudSyncConfig,
+  getAllCloudPluginIds,
   pushLocalOfficialSettingsToRepo,
   syncOfficialDesktopPreferences,
   syncOfficialDshAuPreferences,
@@ -34,7 +35,7 @@ const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 test('normalizeCloudSyncConfig：默认关闭自动同步、默认全选 5 项官方设置，自定义勾选后保留合法项', () => {
   const def = normalizeCloudSyncConfig(undefined);
   assert.equal(def.enabled, false);
-  assert.equal(def.profile, 'generic');
+  assert.equal(def.profile, 'kiro');
   assert.deepEqual(def.selectedItems, [...ALL_OFFICIAL_SYNC_ITEM_IDS]);
   assert.equal(def.customized, false);
   // 本机设置项默认全开，保持旧版「随 dsh-au 插件整体同步」的行为。
@@ -47,10 +48,20 @@ test('normalizeCloudSyncConfig：默认关闭自动同步、默认全选 5 项�
     selectedPreferences: ['shortcuts', 'invalid-pref', 'shortcuts'],
   });
   assert.equal(custom.enabled, true);
-  assert.equal(custom.profile, 'generic');
-  assert.deepEqual(custom.selectedItems, ['general-settings', 'desktop-preferences']);
+  // 旧 generic 方案已下线，保存过的值自动落到「通用」(kiro)。
+  assert.equal(custom.profile, 'kiro');
+  // ui-theme 已是独立同步项，不再被并入旧的 general-settings。
+  assert.deepEqual(custom.selectedItems, ['ui-theme', 'desktop-preferences']);
   assert.deepEqual(custom.selectedPreferences, ['shortcuts']);
   assert.equal(custom.customized, true);
+});
+
+test('normalizeCloudSyncConfig：云清单里有 dsh-au 时固定加入同步，即使用户传入空列表', () => {
+  const ids = getAllCloudPluginIds();
+  const cfg = normalizeCloudSyncConfig({ selectedPlugins: [], syncPluginConfigs: [] });
+  const expected = ids.includes('dsh-au') ? ['dsh-au'] : [];
+  assert.deepEqual(cfg.selectedPlugins, expected);
+  assert.deepEqual(cfg.syncPluginConfigs, expected);
 });
 
 test('computeOfficialSettingsHash：仅模型目录变化也会触发自动同步', (t) => {
@@ -118,7 +129,7 @@ test('applySelectedOfficialPatchBlocks：仅同步已勾选的官方设置块，
 test('dsh-restore.mjs --auto-sync：开关关闭时跳过，开启且自定义勾选时仅还原勾选的设置项', (t) => {
   const { root: syncRepoRoot } = useTempSyncRepo(t, 'dsh-official-restore-');
   copyRestoreMock(syncRepoRoot);
-  writeFileSync(path.join(syncRepoRoot, 'app-config', 'dsh', 'cordis.patch.generic.yml'), [
+  writeFileSync(path.join(syncRepoRoot, 'app-config', 'dsh', 'cordis.patch.kiro.yml'), [
     '- id: ui-theme',
     '  config:',
     '    fontSize: 18',
@@ -187,7 +198,7 @@ test('dsh-restore.mjs --auto-sync：开关关闭时跳过，开启且自定义�
     JSON.stringify({
       cloudSync: {
         enabled: true,
-        profile: 'generic',
+        profile: 'kiro',
         selectedItems: ['ui-theme', 'desktop-preferences'],
         customized: true,
       },
@@ -208,7 +219,7 @@ test('dsh-restore.mjs --auto-sync：开关关闭时跳过，开启且自定义�
   assert.equal(existsSync(path.join(dshHome, 'desktop-preferences.json')), true);
 
   const updatedAuConfig = JSON.parse(readFileSync(auConfigPath, 'utf8'));
-  assert.equal(updatedAuConfig.cloudSync.lastSyncedHash, computeOfficialSettingsHash(syncRepoRoot, 'generic'));
+  assert.equal(updatedAuConfig.cloudSync.lastSyncedHash, computeOfficialSettingsHash(syncRepoRoot, 'kiro'));
   assert.ok(updatedAuConfig.cloudSync.lastSyncedAt);
 });
 
@@ -225,21 +236,29 @@ test('设置页包含云端配置自动同步开关、选择同步项独立弹�
   assert.match(client, /dsh-au-cloud-sync-action/);
   assert.match(client, /dsh-au-cloud-sync-status/);
   assert.match(client, /模型方案：/);
-  // 本机设置按电脑各存一份，弹窗里单独成组并带独立勾选。
-  assert.match(client, /本机设置（按电脑各存一份，互不覆盖）/);
+  // dsh-au 设置页签分两组：所有电脑共用（固定同步）与每台电脑各存一份（带独立勾选）。
+  assert.match(client, /所有电脑共用（固定同步）/);
+  assert.match(client, /每台电脑各存一份（互不覆盖）/);
   assert.match(client, /selectedPreferences/);
   assert.match(client, /设备 \/ 页面切换快捷键/);
   assert.match(client, /模型快捷槽位/);
-  assert.match(client, /DSH 与 Codex 模型供应商、目录及默认模型/);
+  // 方案 H：官方设置逐项一行，名称对齐 DSH 官方叫法，展开后切换和云端 / 官方默认比。
+  assert.match(client, /模型提供商、目录与默认模型/);
+  // 方案 G：展开后四列对照。
+  assert.match(client, /官方默认/);
+  assert.match(client, /is-cloud-diff/);
+  assert.match(client, /未分类的官方设置/);
   assert.match(client, /Codex 模型目录/);
   assert.match(client, /同步完整与精简目录，不切换当前模型/);
   assert.match(client, /\.dsh-au-btn-primary\s*\{\s*background:#2563eb !important;/);
   assert.doesNotMatch(client, /\.dsh-au-btn-primary\s*\{[^}]*var\(--dsw-alias-brand-primary/);
   assert.match(client, /展开对比/);
   assert.match(client, /官方默认/);
-  assert.match(client, /当前云端配置/);
+  assert.match(client, /云端「/);
   assert.match(client, /DSH 官方设置/);
-  assert.match(client, /云插件与配置/);
+  // 页签拆成三个：官方设置 / dsh-au 设置 / 其它云插件，dsh-au 不再出现在插件勾选列表。
+  assert.match(client, /'dsh-au 设置'/);
+  assert.match(client, /其它云插件 \(/);
   assert.match(client, /实时同步已开启/);
   assert.match(client, /\.dsh-au-cloud-sync-list\s*\{[^}]*min-height:0;/);
   assert.match(client, /\.dsh-au-cloud-sync-item\s*\{\s*flex-shrink:0;/);
@@ -249,7 +268,8 @@ test('设置页包含云端配置自动同步开关、选择同步项独立弹�
   assert.match(client, /h\(FullAccessFeatureGroup\),\s*h\(GoalCreationFeatureGroup\),\s*h\(AutoContinueFeatureGroup\)/);
   assert.match(client, /h\(ShortcutSettingsSection\),\s*h\(ModelShortcutSettingsSection\)/);
   assert.match(client, /id: 'sync'[\s\S]*h\(CloudSyncFeatureGroup\)/);
-  assert.equal(OFFICIAL_SYNC_ITEMS.length, 5);
+  // 原 general-settings 拆成 4 个配置块，共 8 个固定同步项。
+  assert.equal(OFFICIAL_SYNC_ITEMS.length, 8);
   assert.ok(OFFICIAL_SYNC_ITEMS.every((item) => Array.isArray(item.comparisons) && item.comparisons.length > 0));
 });
 
@@ -649,13 +669,19 @@ test('buildOfficialSyncItems：能准确识别官方设置与桌面偏好的本�
     assert.equal(item.inSync, true, `${item.id} 应判定与云一致`);
   }
 
+  // 1b. 行内数组仅括号内空格不同（`[ text, image ]` vs `[text, image]`）仍判一致
+  writeFileSync(path.join(profileDir, 'cordis.patch.yml'), localPatchMatch.replace('providers: []', 'providers: [ ]'));
+  const spaced = Object.fromEntries(buildOfficialSyncItems({ repoRoot, dshHome, profile: 'kiro' }).map((i) => [i.id, i]));
+  assert.equal(spaced['llm-providers'].inSync, true);
+  writeFileSync(path.join(profileDir, 'cordis.patch.yml'), localPatchMatch);
+
   // 2. 本地改了默认模型与桌面偏好：应检出 llm-providers 与 desktop-preferences 不一致
   writeFileSync(path.join(profileDir, 'cordis.patch.yml'), localPatchMatch.replace('provider: acp-cursor', 'provider: kiro'));
   writeFileSync(path.join(dshHome, 'desktop-preferences.json'), JSON.stringify({ closeToTray: false, lanAccess: 'lan' }));
 
   const byProfile = buildOfficialSyncItemsByProfile({ repoRoot, dshHome });
   const kiroItems = Object.fromEntries(byProfile.kiro.map((i) => [i.id, i]));
-  assert.equal(kiroItems['general-settings'].inSync, true);
+  assert.equal(kiroItems['ui-theme'].inSync, true);
   assert.equal(kiroItems['llm-providers'].inSync, false);
   assert.deepEqual(kiroItems['llm-providers'].diffDetails, ['agent-default-model']);
   assert.equal(kiroItems['desktop-preferences'].inSync, false);
