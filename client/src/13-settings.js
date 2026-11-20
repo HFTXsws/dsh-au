@@ -1729,12 +1729,19 @@
       const [busy, setBusy] = useState(false);
       const [message, setMessage] = useState('');
       const [modalOpen, setModalOpen] = useState(false);
+      // 新电脑首次接入私有仓库时的确认框；本次会话里用户点了「暂不」就不再自动弹出。
+      const [firstSyncConfirmOpen, setFirstSyncConfirmOpen] = useState(false);
+      const firstSyncDismissedRef = useRef(false);
       const shortcutOverrides = useShortcutOverrides();
       const modelShortcutSnapshot = useModelShortcuts();
 
       const applyCloudSyncResponse = (res) => {
         if (!res?.ok) return;
-        if (res.cloudSync) setCloudSync(prev => ({ ...prev, ...res.cloudSync }));
+        if (res.cloudSync) setCloudSync(prev => ({ ...prev, ...res.cloudSync, firstSyncPending: Boolean(res.cloudSync.firstSyncPending) }));
+        // 首次接入：有私有仓库、从没同步过、总开关已开 → 先确认，再立即拉取，不用等重启。
+        if (res.cloudSync?.firstSyncPending && res.cloudSync.enabled && !firstSyncDismissedRef.current) {
+          setFirstSyncConfirmOpen(true);
+        }
         if (Array.isArray(res.items) && res.items.length > 0) setItems(res.items);
         if (res.itemsByProfile && typeof res.itemsByProfile === 'object') setItemsByProfile(res.itemsByProfile);
         if (Array.isArray(res.pluginItems)) setPluginItems(res.pluginItems);
@@ -1939,6 +1946,10 @@
         : (items && items.length > 0 ? items : FALLBACK_CLOUD_SYNC_ITEMS);
       const allPluginItems = Array.isArray(pluginItems) ? pluginItems : FALLBACK_CLOUD_SYNC_PLUGINS;
       const resolvedPreferenceItems = resolvePreferenceSyncItems(preferenceItems, shortcutOverrides, modelShortcutSnapshot);
+      // 首次拉取确认框里展示的覆盖项数：只算会被本次拉取写入的不一致项。
+      const firstSyncDiffCount = allItems.filter(item => item.inSync === false && (cloudSync.selectedItems || []).includes(item.id)).length
+        + allPluginItems.filter(item => item.inSync === false && (cloudSync.selectedPlugins || []).includes(item.id)).length
+        + resolvedPreferenceItems.filter(item => item.inSync === false && (cloudSync.selectedPreferences || []).includes(item.id)).length;
       const selectedCount = (cloudSync.selectedItems || []).length;
       const selectedPluginCount = (cloudSync.selectedPlugins || []).length;
       const selectedPreferenceCount = (cloudSync.selectedPreferences || []).length;
@@ -2056,7 +2067,60 @@
           onSyncSinglePlugin: handleSyncSinglePlugin,
           busy,
           message,
-        })
+        }),
+        firstSyncConfirmOpen
+          ? portalSettingsModal(h(
+              'div',
+              { className: 'dsh-au-modal-mask dsh-au-modal-mask-above' },
+              h(
+                'div',
+                { className: 'dsh-au-cloud-sync-modal', role: 'alertdialog', 'aria-modal': 'true', style: { maxWidth: '520px' } },
+                h(
+                  'div',
+                  { className: 'dsh-au-cloud-sync-modal-header' },
+                  h(
+                    'div',
+                    null,
+                    h('h3', null, '首次从云端拉取配置'),
+                    h('p', null, `这台电脑还没从私有仓库同步过。将用云端配置覆盖本机 ${firstSyncDiffCount} 项不一致的设置（DSH 官方设置、dsh-au 设置与已勾选的云插件），部分设置需重启 DSH 后生效。`)
+                  )
+                ),
+                h(
+                  'div',
+                  { className: 'dsh-au-cloud-sync-modal-footer' },
+                  h('div', { className: 'dsh-au-cloud-sync-modal-footer-left' }),
+                  h(
+                    'div',
+                    { className: 'dsh-au-cloud-sync-modal-footer-right' },
+                    h(
+                      'button',
+                      {
+                        type: 'button',
+                        className: 'dsh-au-btn',
+                        disabled: busy,
+                        onClick: () => { firstSyncDismissedRef.current = true; setFirstSyncConfirmOpen(false); },
+                      },
+                      '暂不'
+                    ),
+                    h(
+                      'button',
+                      {
+                        type: 'button',
+                        className: 'dsh-au-btn dsh-au-btn-primary',
+                        disabled: busy,
+                        onClick: async () => {
+                          setFirstSyncConfirmOpen(false);
+                          firstSyncDismissedRef.current = true;
+                          await handleRunSync();
+                        },
+                      },
+                      busy ? '正在同步...' : '立即拉取'
+                    )
+                  )
+                )
+              )
+            ))
+          : null
       );
     }
 

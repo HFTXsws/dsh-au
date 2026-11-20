@@ -259,6 +259,7 @@ test('设置页包含云端配置自动同步开关、选择同步项独立弹�
   // 页签拆成三个：官方设置 / dsh-au 设置 / 其它云插件，dsh-au 不再出现在插件勾选列表。
   assert.match(client, /'dsh-au 设置'/);
   assert.match(client, /其它云插件 \(/);
+  assert.match(client, /首次从云端拉取配置/);
   assert.match(client, /实时同步已开启/);
   assert.match(client, /\.dsh-au-cloud-sync-list\s*\{[^}]*min-height:0;/);
   assert.match(client, /\.dsh-au-cloud-sync-item\s*\{\s*flex-shrink:0;/);
