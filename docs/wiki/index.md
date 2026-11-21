@@ -18,3 +18,4 @@
 - [gotchas/windows-pythonutf8-subprocess-decode.md](gotchas/windows-pythonutf8-subprocess-decode.md) — 控制器的 `PYTHONUTF8=1` 传给服务脚本后，`text=True` 读取 GBK 命令输出会静默崩溃；改为按字节读取、按 OEM 码页解码。
 - [gotchas/windows-boot-vbs-cross-repo-contract.md](gotchas/windows-boot-vbs-cross-repo-contract.md) — Windows 开机 `.vbs` 通过 `pythonw.exe` 跨仓库调用 `AuWin` 时，必须带 `getattr` 兼容回退并重新同步 `.vbs`，防止 `ImportError` 被静默吞没。
 - [gotchas/windows-dsh-job-object-服务退出与自愈.md](gotchas/windows-dsh-job-object-服务退出与自愈.md) — DSH 重启连带关闭 Windows 后台服务时，检查 Job Object 脱离、持久生命周期日志、受限自愈与多机 binding 隔离。
+- [gotchas/windows-client-bundle-crlf-check.md](gotchas/windows-client-bundle-crlf-check.md) — Windows 下 Git 将 `client/client.js` 转为 CRLF 会导致 `check:client` 误报不一致；先跑 `npm run build:client` 再跑 `npm test`，无实质 diff 时不提交。

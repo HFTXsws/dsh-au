@@ -29,3 +29,9 @@
 - 来源：排查 `useMemo` 未解构拖垮 `shell.overlay`、以及 `compilePrivateExtension` 与 Doctor 导出校验不一致导致扩展面板空白
 - 变更：在 `domain/private-extensions-contract.md` 补充 `useExtension` 兼容写法、`renderCenter` 约束与 `01-runtime.js` Hook 解构规则；同步增强 `lib/private-extensions.js` Doctor 试跑与 `tests/private-extensions.test.mjs` 回归检查
 
+## [2026-11-21] ingest | Windows 下 client/client.js CRLF 换行符校验误报
+
+- 操作：ingest
+- 来源：多机切换后在 Windows 运行 `npm test` 频繁触发 `check:client` 报错
+- 变更：新增 `gotchas/windows-client-bundle-crlf-check.md`，更新 `index.md` 与 `AGENTS.md`
+

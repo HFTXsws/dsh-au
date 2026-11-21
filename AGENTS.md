@@ -18,3 +18,8 @@
   - `git config --local user.email "358544300+HFTXsws@users.noreply.github.com"`
 - 该规则仅作为换机防遗忘与防误用其他全局邮箱的提醒；若协作者明确使用自己的署名，不强制覆盖。
 
+## 前端构建校验（Windows CRLF）
+
+- 若 `npm test` / `npm run check:client` 报错 `client/client.js 与 client/src 不一致`，先执行 `npm run build:client` 再重跑 `npm test`（详情见 `docs/wiki/gotchas/windows-client-bundle-crlf-check.md`）。
+- 构建后若仅因 CRLF/LF 差异导致 `git add client/client.js` 无实质变更，无需额外提交。
+
