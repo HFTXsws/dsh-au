@@ -1,19 +1,19 @@
 ---
 name: au-plugin-release
-description: DSH 插件版本对齐、预检打包与上架发布工具。当用户输入“Au插件发布”、“发版”、“发布插件”、“上架插件市场”或需要对齐当前 DSH 版本号发版时使用。
+description: DSH 插件版本对齐、Release 更新日志生成、预检打包与上架发布工具。当用户输入“Au插件发布”、“发版”、“发布插件”、“上架插件市场”或需要对齐当前 DSH 版本号发版时使用。
 ---
 
 # Au插件发布
 
-将本仓库 DSH 插件版本号对齐本机当前运行的 DSH 版本前缀（格式 `<dsh版本>-<递增序号>`，如 `0.2.2-rc.3-1`、`0.2.2-rc.3-2`），并由脚本一站式完成前端构建、一致性检查、测试与打包预览。
+将本仓库 DSH 插件版本号对齐本机当前运行的 DSH 版本前缀（格式 `<dsh版本>-<递增序号>`，如 `0.2.2-rc.3-1`、`0.2.2-rc.3-2`），由脚本一站式完成版本计算、前端构建体检与提交记录采集，并在**用户确认 Release 更新日志后**同步推送到 GitHub 与创建 GitHub Release（供 DSH 插件市场「更新内容 ›」展示宽屏版本说明）。
 
 ## 工作流
 
 ### 1. 预检与版本对齐计算（只读或写入版本号）
 
-直接调用捆绑脚本，禁止手算版本号或手动拼接文件检查：
+调用捆绑脚本获取当前 DSH 版本、下一递增版本号（`versionPlan.nextVersion`）、上次 Release 以来的提交记录（`recentCommits`）以及构建校验结果：
 
-- **仅预览下一版本号与仓库状态（不改文件）**：
+- **预览下一版本号、近期提交与仓库状态（不改文件）**：
   - macOS / Linux / Git Bash:
     ```bash
     node .claude/skills/au-plugin-release/scripts/release-plugin.mjs --mode plan
@@ -23,34 +23,51 @@ description: DSH 插件版本对齐、预检打包与上架发布工具。当用
     node .claude/skills/au-plugin-release/scripts/release-plugin.mjs --mode plan
     ```
 
-- **写入新版本号并执行构建与检查（跳过全量测试用 `--skip-tests`）**：
+- **将新版本号写入 `package.json` 并执行构建与检查（已跑过测试可加 `--skip-tests`）**：
   - macOS / Linux / Git Bash:
     ```bash
-    node .claude/skills/au-plugin-release/scripts/release-plugin.mjs --mode apply
+    node .claude/skills/au-plugin-release/scripts/release-plugin.mjs --mode apply --skip-tests
     ```
   - Windows PowerShell:
     ```powershell
-    node .claude/skills/au-plugin-release/scripts/release-plugin.mjs --mode apply
+    node .claude/skills/au-plugin-release/scripts/release-plugin.mjs --mode apply --skip-tests
     ```
 
-脚本读取 `~/.dsh/logs/desktop-next-*.jsonl` 中当前运行的 `fields.dsh` 版本作为前缀，结合 `package.json` 与 npm 已发布版本自动算出 `<dshVersion>-<N>`（从 `1` 起无限递增），并输出结构化 JSON（含 `versionPlan`、`buildCheck`、`packInfo`、`gitState`）。
+### 2. 生成中文 Release 日志草稿并交由用户确认（推送门禁）
 
-### 2. Git 署名核对与提交推送确认
+**核心门禁：在执行 `git push` 和创建 GitHub Release 之前，必须先向用户展示拟发布的版本号与中文 Release 日志草稿，等待用户确认或修改。**
 
-根据脚本返回的 `gitState` 与 `versionPlan`：
-1. 若 `gitState.signatureConfigured` 为 `false`，按项目 `AGENTS.md` 提醒或设置本地 Git 署名（`HFTXsws` / `358544300+HFTXsws@users.noreply.github.com`）。
-2. 向用户展示计算出的目标版本号（`versionPlan.nextVersion`）、变更文件与 `packInfo` 摘要，确认后执行提交、推送与 `npm publish`（属于对外发布操作，未经用户当轮明确授权不得自动执行 `git push` 或 `npm publish`）。
+Release 日志草稿要求（适配 `dshmarket` 宽屏 Markdown 渲染器）：
+- 仅使用三级标题 `###`、无序列表 `-`、加粗 `**` 与行内代码 `` ` ``（不写裸 HTML，方便插件市场直接渲染）。
+- 用用户一眼能看懂的大白话总结本次「新增与优化」或「问题修复」，不堆砌内部函数名或文件路径。
 
-### 3. 提交并推送到 GitHub（插件市场自动抓取更新）
+展示模板：
+```markdown
+拟发布版本：`v<nextVersion>`
 
-本插件在 `awesome-dsh-plugin` 插件市场以 GitHub 仓库方式上架（`https://github.com/HFTXsws/dsh-au`），市场爬虫会直接读取 GitHub 默认分支的 `package.json` 版本号与源码，**无需 `npm publish`**。
+### 新增与优化
+- **<功能点标题>**：<一句话人话说明>
+```
 
-用户确认发布后，使用 `gh auth git-credential` 确保以 `HFTXsws` 账号推送至 `github`（并同步推送 `origin`）：
-- macOS / Linux / Git Bash:
-  ```bash
-  git add -A && git commit -m "chore(release): bump version to <nextVersion>" && git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push github main && git push origin main
-  ```
-- Windows PowerShell:
-  ```powershell
-  git add -A; git commit -m "chore(release): bump version to <nextVersion>"; git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push github main; git push origin main
-  ```
+### 3. 用户确认后：提交推送并发布 GitHub Release
+
+用户确认 Release 日志后：
+1. 若 `gitState.signatureConfigured` 为 `false`，先按 `AGENTS.md` 配置本地署名（`HFTXsws` / `358544300+HFTXsws@users.noreply.github.com`）。
+2. 提交并推送代码到 `github`（使用 `gh auth git-credential` 确保走 `HFTXsws` 账号）与 `origin`：
+   - macOS / Linux / Git Bash:
+     ```bash
+     git add -A && git commit -m "chore(release): bump version to <nextVersion>" && git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push github main && git push origin main
+     ```
+   - Windows PowerShell:
+     ```powershell
+     git add -A; git commit -m "chore(release): bump version to <nextVersion>"; git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push github main; git push origin main
+     ```
+3. 将用户确认的 Release 日志写入临时文件，调用脚本 `--mode publish-release` 创建（或更新）GitHub Release，随后删除临时文件：
+   - macOS / Linux / Git Bash:
+     ```bash
+     node .claude/skills/au-plugin-release/scripts/release-plugin.mjs --mode publish-release --target-version <nextVersion> --notes-file <notesFilePath>
+     ```
+   - Windows PowerShell:
+     ```powershell
+     node .claude/skills/au-plugin-release/scripts/release-plugin.mjs --mode publish-release --target-version <nextVersion> --notes-file <notesFilePath>
+     ```

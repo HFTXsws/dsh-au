@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * Au插件发布：DSH 版本自动探测、递增版本号计算、构建体检与 npm 发布预检脚本。
+ * Au插件发布：DSH 版本自动探测、递增版本号计算、构建体检、Release 素材采集与 GitHub Release 发布脚本。
  * 遵循「优秀 Skill SSOT」第 5 节脚本四原则：
  * 1. 自愈性：捕获所有异常，始终以 exit 0 输出结构化 JSON（success + data + error + metadata）
  * 2. 结构化输出：统一 JSON，便于 Agent 确定性解析
  * 3. 幂等性：--mode plan 纯只读不改文件；--mode apply 仅在目标版本变化时原子写回 package.json
- * 4. 安全边界：只读 ~/.dsh 日志与当前仓库状态，不自动执行 git push 或 npm publish
+ * 4. 安全边界：只读 ~/.dsh 日志与当前仓库状态；仅在用户确认后由 --mode publish-release 创建/更新 GitHub Release
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
@@ -15,12 +15,16 @@ import { fileURLToPath } from 'node:url';
 
 const SCRIPT_NAME = 'release-plugin.mjs';
 const startTime = Date.now();
+const DEFAULT_GITHUB_REPO = 'HFTXsws/dsh-au';
 
 function parseArgs(argv) {
   const out = {
     mode: 'plan',
     dshVersion: '',
     targetVersion: '',
+    notesFile: '',
+    releaseTitle: '',
+    githubRepo: DEFAULT_GITHUB_REPO,
     skipTests: false,
     repoRoot: resolve(dirname(fileURLToPath(import.meta.url)), '../../../..'),
   };
@@ -32,6 +36,12 @@ function parseArgs(argv) {
       out.dshVersion = String(argv[++i]).trim();
     } else if (arg === '--target-version' && argv[i + 1]) {
       out.targetVersion = String(argv[++i]).trim();
+    } else if (arg === '--notes-file' && argv[i + 1]) {
+      out.notesFile = resolve(argv[++i]);
+    } else if (arg === '--release-title' && argv[i + 1]) {
+      out.releaseTitle = String(argv[++i]).trim();
+    } else if (arg === '--github-repo' && argv[i + 1]) {
+      out.githubRepo = String(argv[++i]).trim();
     } else if (arg === '--repo-root' && argv[i + 1]) {
       out.repoRoot = resolve(argv[++i]);
     } else if (arg === '--skip-tests') {
@@ -97,7 +107,7 @@ export function computeNextPluginVersion(dshVersion, currentVersion = '', publis
   let maxSeq = 0;
   const candidates = [currentVersion, ...(Array.isArray(publishedVersions) ? publishedVersions : [])];
   for (const candidate of candidates) {
-    const str = String(candidate || '').trim();
+    const str = String(candidate || '').trim().replace(/^v/i, '');
     if (!str.startsWith(prefix)) continue;
     const tail = str.slice(prefix.length);
     if (/^\d+$/.test(tail)) {
@@ -133,21 +143,44 @@ function runCmd(command, args, cwd, timeoutMs = 120000) {
   };
 }
 
-function queryPublishedVersions(pkgName, cwd) {
-  if (!pkgName) return [];
-  const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-  const res = runCmd(npmCmd, ['view', pkgName, 'versions', '--json'], cwd, 12000);
+function queryGithubReleaseTags(githubRepo, cwd) {
+  const res = runCmd('gh', ['release', 'list', '-R', githubRepo, '--json', 'tagName,isLatest,publishedAt', '-L', '20'], cwd, 12000);
   if (!res.ok || !res.stdout) return [];
   try {
     const parsed = JSON.parse(res.stdout);
-    if (Array.isArray(parsed)) return parsed.map(String);
-    if (typeof parsed === 'string') return [parsed];
-  } catch {}
-  return [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function inspectRecentCommitsForRelease(repoRoot, lastReleaseTag = '') {
+  const rangeArgs = lastReleaseTag
+    ? ['log', `${lastReleaseTag}..HEAD`, '--pretty=format:%h|%ad|%s', '--date=short', '-n', '20']
+    : ['log', '--pretty=format:%h|%ad|%s', '--date=short', '-n', '10'];
+  const res = runCmd('git', rangeArgs, repoRoot, 5000);
+  if (!res.ok && lastReleaseTag) {
+    const fallback = runCmd('git', ['log', '--pretty=format:%h|%ad|%s', '--date=short', '-n', '10'], repoRoot, 5000);
+    return parseLogLines(fallback.stdout);
+  }
+  return parseLogLines(res.stdout);
+}
+
+function parseLogLines(raw) {
+  if (!raw) return [];
+  return raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [sha = '', date = '', ...rest] = line.split('|');
+      return { sha, date, subject: rest.join('|') };
+    });
 }
 
 function inspectGitState(repoRoot) {
   const branch = runCmd('git', ['rev-parse', '--abbrev-ref', 'HEAD'], repoRoot, 5000);
+  const headSha = runCmd('git', ['rev-parse', 'HEAD'], repoRoot, 5000);
   const status = runCmd('git', ['status', '--porcelain'], repoRoot, 5000);
   const userName = runCmd('git', ['config', '--local', 'user.name'], repoRoot, 5000);
   const userEmail = runCmd('git', ['config', '--local', 'user.email'], repoRoot, 5000);
@@ -156,11 +189,43 @@ function inspectGitState(repoRoot) {
     : [];
   return {
     branch: branch.stdout || 'unknown',
+    headSha: headSha.stdout || '',
     localUserName: userName.stdout || '',
     localUserEmail: userEmail.stdout || '',
     signatureConfigured: Boolean(userName.stdout && userEmail.stdout),
     changedFiles,
   };
+}
+
+function publishGithubRelease(opts, tagVersion) {
+  const tag = tagVersion.startsWith('v') ? tagVersion : `v${tagVersion}`;
+  const title = opts.releaseTitle || tag;
+  if (!opts.notesFile || !existsSync(opts.notesFile)) {
+    throw new Error('publish-release 模式必须通过 --notes-file 提供已确认的 Release 日志文件路径');
+  }
+  const existing = runCmd('gh', ['release', 'view', tag, '-R', opts.githubRepo, '--json', 'tagName,url'], opts.repoRoot, 12000);
+  if (existing.ok) {
+    const editRes = runCmd(
+      'gh',
+      ['release', 'edit', tag, '-R', opts.githubRepo, '--title', title, '--notes-file', opts.notesFile],
+      opts.repoRoot,
+      20000,
+    );
+    if (!editRes.ok) {
+      throw new Error(`更新 GitHub Release 失败: ${editRes.stderr || editRes.stdout || editRes.error}`);
+    }
+    return { action: 'updated', tag, title, repo: opts.githubRepo, url: editRes.stdout };
+  }
+  const createRes = runCmd(
+    'gh',
+    ['release', 'create', tag, '-R', opts.githubRepo, '--target', 'main', '--title', title, '--notes-file', opts.notesFile],
+    opts.repoRoot,
+    25000,
+  );
+  if (!createRes.ok) {
+    throw new Error(`创建 GitHub Release 失败: ${createRes.stderr || createRes.stdout || createRes.error}`);
+  }
+  return { action: 'created', tag, title, repo: opts.githubRepo, url: createRes.stdout };
 }
 
 function main() {
@@ -175,7 +240,21 @@ function main() {
     ? { dshVersion: opts.dshVersion, source: 'cli:--dsh-version' }
     : detectCurrentDshVersion();
 
-  const publishedVersions = queryPublishedVersions(pkg.name, opts.repoRoot);
+  const githubReleases = queryGithubReleaseTags(opts.githubRepo, opts.repoRoot);
+  const releaseTags = githubReleases.map((r) => String(r?.tagName || '').replace(/^v/i, '')).filter(Boolean);
+  const latestReleaseTag = githubReleases[0]?.tagName || '';
+
+  if (opts.mode === 'publish-release') {
+    const targetVer = opts.targetVersion || currentVersion;
+    const releaseResult = publishGithubRelease(opts, targetVer);
+    return {
+      mode: opts.mode,
+      packageName: pkg.name,
+      currentVersion,
+      releaseResult,
+    };
+  }
+
   const versionPlan = opts.targetVersion
     ? {
         dshVersion: detected.dshVersion,
@@ -183,7 +262,7 @@ function main() {
         nextSequence: null,
         nextVersion: opts.targetVersion,
       }
-    : computeNextPluginVersion(detected.dshVersion, currentVersion, publishedVersions);
+    : computeNextPluginVersion(detected.dshVersion, currentVersion, releaseTags);
 
   let versionUpdated = false;
   if (opts.mode === 'apply' && pkg.version !== versionPlan.nextVersion) {
@@ -212,36 +291,21 @@ function main() {
     }
   }
 
-  const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-  const packPreview = runCmd(npmCmd, ['pack', '--dry-run', '--json'], opts.repoRoot, 30000);
-  let packInfo = null;
-  if (packPreview.ok && packPreview.stdout) {
-    try {
-      const parsed = JSON.parse(packPreview.stdout);
-      const first = Array.isArray(parsed) ? parsed[0] : parsed;
-      if (first) {
-        packInfo = {
-          id: first.id,
-          name: first.name,
-          version: first.version,
-          size: first.size,
-          unpackedSize: first.unpackedSize,
-          entryCount: Array.isArray(first.files) ? first.files.length : 0,
-        };
-      }
-    } catch {}
-  }
-
+  const recentCommits = inspectRecentCommitsForRelease(opts.repoRoot, latestReleaseTag);
   const gitState = inspectGitState(opts.repoRoot);
   return {
     mode: opts.mode,
     packageName: pkg.name,
     dshDetection: detected,
-    versionPlan,
+    versionPlan: {
+      ...versionPlan,
+      releaseTag: `v${versionPlan.nextVersion}`,
+      latestReleaseTag,
+    },
     versionUpdated,
     buildCheck: { ok: true, message: checkRes.stdout },
     testSummary,
-    packInfo,
+    recentCommits,
     gitState,
   };
 }
