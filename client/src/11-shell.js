@@ -74,7 +74,20 @@
      * 常驻壳层：设备栏插入中心列顶部，远程 iframe 插入 shell.overlay。
      * 两处都是 root 作用域，因此切换本机对话与其它主面板时不会卸载 iframe。
      */
-    function AuFleetShell({ selectPanel, collapseSidebar, expandSidebar, usePanelInfo, openLocalSession, readLocalSessionId }) {
+    function AuFleetShell({ selectPanel, collapseSidebar, expandSidebar, toggleSidebar, usePanelInfo, openLocalSession, readLocalSessionId }) {
+      const doToggleSidebar = useCallback(() => {
+        if (typeof toggleSidebar === 'function') {
+          toggleSidebar();
+        } else if (document.querySelector('[data-sidebar-collapsed]')) {
+          expandSidebar();
+        } else {
+          collapseSidebar();
+        }
+      }, [toggleSidebar, expandSidebar, collapseSidebar]);
+      const toggleSidebarRef = useRef(doToggleSidebar);
+      toggleSidebarRef.current = doToggleSidebar;
+      const selectPanelRef = useRef(selectPanel);
+      selectPanelRef.current = selectPanel;
       const [state, setState] = useState({ self: null, devices: [], lanPeers: [], remotes: [] });
       const [activeId, setActiveId] = useState(null);
       const [openedIds, setOpenedIds] = useState([]);
@@ -345,9 +358,17 @@
       }, [hosts]);
 
       // 兼容侧栏既有「Au 多机」入口：点击后回到会话主面板，常驻栏不发生重建。
+      // 点击设置、插件市场等其他主面板时，切回本机视图，避免远端舞台遮盖设置/插件面板。
       useEffect(() => {
-        if (activePanelId === PANEL_ID) selectPanel(null);
-      }, [activePanelId, selectPanel]);
+        if (activePanelId === PANEL_ID) {
+          selectPanel(null);
+          return;
+        }
+        if (activePanelId && activeId) {
+          clearStageTransition();
+          setActiveId(null);
+        }
+      }, [activePanelId, activeId, clearStageTransition, selectPanel]);
 
       // 确保当前选中的设备标签始终加入保活挂载集合，并在 html 根节点标记远端舞台激活态供本机移动端插件隐藏悬浮按钮。
       useEffect(() => {
@@ -473,7 +494,7 @@
       const activeUnavailable = Boolean(activeDev && !loadedMap[activeFrameKey] && (activeDev.status === 'offline' || failedLoadDevices[activeDev.id]));
       const activeLoading = Boolean(activeDev && !activeNeedsCredentials && !activeUnavailable && !loadedMap[activeFrameKey]);
       const lanOn = state.self?.lanShareEnabled !== false;
-      const showStage = activeDev !== null && stageRect !== null;
+      const showStage = activeDev !== null && stageRect !== null && (!activePanelId || activePanelId === PANEL_ID);
       useEffect(() => {
         if (!hosts || !state.self || (activeId && !activeDev)) return;
         const frame = activeId
@@ -692,7 +713,7 @@
       }, []);
 
       // reason 标明是谁让画面回到本机（顶栏点击、快捷键、设备移除、外部事件等），用于排查“自动切回本机”。
-      const selectLocal = useCallback(({ preserveTopbar = false, reason = 'show-local', trigger = '', sessionId = '', knownRemote, recordCount } = {}) => {
+      const selectLocal = useCallback(({ preserveTopbar = false, preservePanel = false, reason = 'show-local', trigger = '', sessionId = '', knownRemote, recordCount } = {}) => {
         reportClientEvent('select-local', 'local', {
           fromRouteId: openedRouteIdsRef.current.get(activeId) || '',
           reason,
@@ -707,7 +728,7 @@
         if (!preserveTopbar) setTopbarCollapsed(false);
         // 返回本机对话时恢复本机导航；仅在收起状态调用，避免误反向折叠。
         expandSidebar();
-        selectPanel(null);
+        if (!preservePanel) selectPanel(null);
       }, [activeId, clearStageTransition, expandSidebar, selectPanel]);
       const selectDevice = useCallback((id, { preserveTopbar = false, targetUrl = '', navigateTopLevel = false } = {}) => {
         const selectedDevice = devices.find((device) => device.id === id);
@@ -899,6 +920,7 @@
             // 外部派发方（待办、侧栏拦截等）可在 detail.reason 等字段里说明来源，原样带进日志。
             selectLocal({
               preserveTopbar: true,
+              preservePanel: event.detail?.preservePanel === true,
               reason: typeof event.detail?.reason === 'string' && event.detail.reason ? event.detail.reason : 'select-event',
               trigger: typeof event.detail?.trigger === 'string' ? event.detail.trigger : '',
               sessionId: typeof event.detail?.sessionId === 'string' ? event.detail.sessionId : '',
@@ -983,6 +1005,20 @@
             if (isDeviceSwitchMessageFromStage(event.source, frames)) triggerDshReload();
           } else if (event.data.type === SHORTCUT_ACTION_MESSAGE && event.data.action === 'dsh.restart') {
             if (isDeviceSwitchMessageFromStage(event.source, frames)) triggerDshRestart();
+          } else if (event.data.type === SHORTCUT_ACTION_MESSAGE && event.data.action === 'menu.open') {
+            if (isDeviceSwitchMessageFromStage(event.source, frames)) dispatchWorkbenchShortcut('fav');
+          } else if (event.data.type === SHORTCUT_ACTION_MESSAGE && event.data.action === 'services.open') {
+            if (isDeviceSwitchMessageFromStage(event.source, frames)) dispatchWorkbenchShortcut('services');
+          } else if (event.data.type === 'dsh-au:controlled-host-action') {
+            if (isDeviceSwitchMessageFromStage(event.source, frames)) {
+              if (event.data.action === 'toggle-sidebar') {
+                toggleSidebarRef.current?.();
+              } else if (event.data.action === 'select-panel' && typeof event.data.panelId === 'string') {
+                selectLocal({ preserveTopbar: true, preservePanel: true, reason: 'controlled-panel-shortcut' });
+                selectPanelRef.current?.(event.data.panelId);
+              }
+            }
+            return;
           } else if (event.data.type === 'remote-session-confirmed' || event.data.type === 'frame-ready') {
             clearStageTransition();
             if (event.data.type === 'remote-session-confirmed') {
@@ -1008,12 +1044,12 @@
         };
       }, [clearFailedLoad, clearStageTransition, compactMobile, devices, hosts, selectDevice, selectLocal, selectRelativeDevice, state.self?.deviceId, state.self?.instanceId]);
 
-      // 统一菜单与后台服务的快捷键（默认 Ctrl+Delete、Shift+\\，可在设置页修改）由捕获阶段监听转为同一事件。
+      // 统一菜单与后台服务的快捷键（默认 Alt+9、Alt+0，可在设置页修改）由宿主快捷键服务与捕获阶段监听共同转为同一事件。
       useEffect(() => {
         const onWorkbenchShortcut = (event) => {
           const tab = event.detail?.tab;
-          if (tab === 'fav') setWorkbenchTab((prev) => (prev ? null : 'fav'));
-          else if (tab === 'services') setWorkbenchTab('services');
+          if (tab === 'fav') setWorkbenchTab((prev) => (prev === 'fav' ? null : 'fav'));
+          else if (tab === 'services') setWorkbenchTab((prev) => (prev === 'services' ? null : 'services'));
         };
         const onKey = (event) => {
           if (event.defaultPrevented) return;

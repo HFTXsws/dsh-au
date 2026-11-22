@@ -443,6 +443,69 @@ test('client remoteWorkspaces helpers merge server + controlled iframe snapshots
   assert.equal(helpers.shouldSwitchToLocalOnSidebarClick(nativeWorkspaceTarget, remoteActiveDoc), true);
   assert.equal(helpers.shouldSwitchToLocalOnSidebarClick(remoteRowTarget, remoteActiveDoc), false);
 
+  // 验证侧边栏功能面板按钮（插件市场、全局设置等）在远端激活时点击应切回本地
+  const panelRowBtnTarget = {
+    closest(selector) {
+      if (selector.includes('_sidebarCol') || selector.includes('aside[data-slot="sidebar"]')) return {};
+      if (selector === '[data-dsh-au-remote-workspaces="1"]') return null;
+      if (selector.includes('button[class*="_panelRow"]')) return {};
+      return null;
+    },
+  };
+  const pluginsPanelTarget = {
+    closest(selector) {
+      if (selector.includes('_sidebarCol') || selector.includes('aside[data-slot="sidebar"]')) return {};
+      if (selector === '[data-dsh-au-remote-workspaces="1"]') return null;
+      if (selector.includes('[data-panel-id]')) return {};
+      return null;
+    },
+  };
+  const settingsAreaBtnTarget = {
+    closest(selector) {
+      if (selector.includes('_settingsArea')) return {};
+      if (selector === '[data-dsh-au-remote-workspaces="1"]') return null;
+      if (selector.includes('[class*="_settingsArea"] button')) return {};
+      return null;
+    },
+  };
+  const settingsBtnTarget = {
+    closest(selector) {
+      if (selector.includes('_sidebarCol') || selector.includes('aside[data-slot="sidebar"]')) return {};
+      if (selector === '[data-dsh-au-remote-workspaces="1"]') return null;
+      if (selector.includes('button[class*="_settings"]')) return {};
+      return null;
+    },
+  };
+  assert.equal(helpers.shouldSwitchToLocalOnSidebarClick(panelRowBtnTarget, remoteActiveDoc), true);
+  assert.equal(helpers.shouldSwitchToLocalOnSidebarClick(pluginsPanelTarget, remoteActiveDoc), true);
+  assert.equal(helpers.shouldSwitchToLocalOnSidebarClick(settingsAreaBtnTarget, remoteActiveDoc), true);
+  assert.equal(helpers.shouldSwitchToLocalOnSidebarClick(settingsBtnTarget, remoteActiveDoc), true);
+
+  // 验证点击远端工作区行与远端会话行时不切回本地（保持 false）
+  const remoteNativeWsRowTarget = {
+    getAttribute(k) { return k === 'data-row-key' ? 'workspace:dsh-au-remote-ws:dev-mac:ws-1' : null; },
+    closest(selector) {
+      if (selector.includes('_sidebarCol') || selector.includes('aside[data-slot="sidebar"]')) return {};
+      if (selector === '[data-dsh-au-remote-workspaces="1"]') return null;
+      if (selector.includes('[data-row-key^="workspace:dsh-au-remote-ws:"]')) return this;
+      if (selector.includes('[data-row-key^="workspace:"]')) return this;
+      return null;
+    },
+  };
+  assert.equal(helpers.shouldSwitchToLocalOnSidebarClick(remoteNativeWsRowTarget, remoteActiveDoc), false);
+
+  helpers.store.nativeSessionById.set('s-mac-1', { sessionId: 's-mac-1' });
+  const remoteNativeSessRowTarget = {
+    getAttribute(k) { return k === 'data-row-key' ? 'session:s-mac-1' : null; },
+    closest(selector) {
+      if (selector.includes('_sidebarCol') || selector.includes('aside[data-slot="sidebar"]')) return {};
+      if (selector === '[data-dsh-au-remote-workspaces="1"]') return null;
+      if (selector.includes('[data-row-key^="session:"]')) return this;
+      return null;
+    },
+  };
+  assert.equal(helpers.shouldSwitchToLocalOnSidebarClick(remoteNativeSessRowTarget, remoteActiveDoc), false);
+
   // 验证实机 AppFrame (_sidebarCol -> _regionArea -> _treeBody -> div[role="tree"][class*="_list"]) 挂载契约
   const treeEl = {
     children: [],
@@ -802,6 +865,8 @@ test('installNativeWorkspaceBridge merges remote workspaces into native stores, 
 
   let localOpenedSession = null;
   let retainedKeysResult = null;
+  let localStartedSessionCalls = 0;
+  const expandedGroupKeys = [];
   const uiWorkspace = {
     orderBy: 'recent',
     workspaces: wsList,
@@ -812,7 +877,9 @@ test('installNativeWorkspaceBridge merges remote workspaces into native stores, 
           'dsh-au-remote-ws:dev-mac:ws-mac': true,
         },
       }),
-      setGroupExpanded() {},
+      setGroupExpanded(wsId) {
+        expandedGroupKeys.push(wsId);
+      },
       retainAccountKeys(keys) {
         retainedKeysResult = keys;
       },
@@ -821,7 +888,9 @@ test('installNativeWorkspaceBridge merges remote workspaces into native stores, 
       localOpenedSession = id;
     },
     selectWorkspace() {},
-    startSession() {},
+    startSession() {
+      localStartedSessionCalls++;
+    },
   };
   const workspacesSvc = {
     list: wsList,
@@ -927,6 +996,21 @@ test('installNativeWorkspaceBridge merges remote workspaces into native stores, 
       // 验证 retainAccountKeys 保留远端工作区展开键
       uiWorkspace.view.retainAccountKeys(['', 'ws-local-1', 'ws-local-2']);
       assert.equal(retainedKeysResult.includes('dsh-au-remote-ws:dev-mac:ws-mac'), true);
+
+      // 验证原生快捷键无参调用 uiWorkspace.startSession() 在远端激活态下直接路由到远端工作区新建会话，而不切回本地
+      assert.equal(helpers.store.activeDeviceId, 'dev-mac');
+      const startSessionPromise = uiWorkspace.startSession();
+      assert.ok(startSessionPromise, '无参调用 startSession 应路由到 activateRemoteWorkspace 并返回 Promise');
+      assert.equal(localStartedSessionCalls, 0, '远端激活态下无参 startSession 不应调用原生本地新建会话');
+      assert.equal(helpers.store.activeDeviceId, 'dev-mac', '无参 startSession 必须保持当前远端设备激活，绝不能切回本地');
+      assert.equal(expandedGroupKeys.includes('dsh-au-remote-ws:dev-mac:ws-mac'), true, '应自动展开当前远端工作区分组');
+
+      // 验证显式传参指定本地工作区时切回本地并调用原生 startSession
+      uiWorkspace.startSession('ws-local-1');
+      assert.equal(localStartedSessionCalls, 1, '指定本地工作区时应调用原生 startSession');
+      assert.equal(helpers.store.activeDeviceId, null, '指定本地工作区时应切回本地设备');
+      // 恢复远端激活态供后续测试步骤使用
+      helpers.store.activeDeviceId = 'dev-mac';
     } finally {
       globalThis.fetch = origFetch;
     }

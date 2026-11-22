@@ -130,7 +130,7 @@ function createHookHost(browser) {
   const bindings = { require: requireBoundary, ...browser.globals };
   // Read actual source fragments instead of generated client.js, which another agent builds.
   exported = new Function(...Object.keys(bindings), fragments.map((file) => readFileSync(join(srcDir, file), 'utf8')).join('\n')
-    + '\nreturn { AuFleetShell, RemoteDshFrame, RemoteManagerModal, installControlledFrameShortcutBridge };')(...Object.values(bindings));
+    + '\nreturn { AuFleetShell, RemoteDshFrame, RemoteManagerModal, UnifiedWorkbenchModal, installControlledFrameShortcutBridge };')(...Object.values(bindings));
   return {
     exported,
     mount(component, props) { root = component; rootProps = props; dirty = true; render(); },
@@ -279,7 +279,11 @@ async function shell(t, snapshot, options = {}) {
   const host = createHookHost(browser);
   // Injected DSH layout APIs are host SDK boundaries; the host stays on its normal main panel.
   host.mount(host.exported.AuFleetShell, {
-    selectPanel() {}, collapseSidebar() {}, expandSidebar() {}, usePanelInfo: (selector) => selector({ activePanelId: null }),
+    selectPanel: options.selectPanel || (() => {}),
+    collapseSidebar: options.collapseSidebar || (() => {}),
+    expandSidebar: options.expandSidebar || (() => {}),
+    toggleSidebar: options.toggleSidebar || (() => {}),
+    usePanelInfo: options.usePanelInfo || ((selector) => selector({ activePanelId: options.activePanelId || null })),
   });
   t.after(() => host.unmount());
   await browser.settle(host);
@@ -476,11 +480,11 @@ test('electron topbar tab embeds the remote page and stays on the shell', async 
   assert.ok(frame(host, 'mac'), 'desktop shell must keep the remote page inside the current window');
 });
 
-test('browser topbar lan tab assigns the origin url', async (t) => {
+test('browser topbar lan tab uses local auth-injecting proxy url', async (t) => {
   const devices = [device('mac', [{ id: 'lan', type: 'lan', url: 'http://192.0.2.10:31990/' }])];
   const { browser, host } = await shell(t, state(devices));
   await click(host, browser, 'mac局域网');
-  assert.equal(browser.navigations[0], 'http://192.0.2.10:31990/');
+  assert.equal(browser.navigations[0], 'http://127.0.0.1:9000/');
   assert.equal(frames(host).length, 0);
 });
 
@@ -503,7 +507,7 @@ test('explicit refresh adopts the newest route with a new page and ignores stale
   const refreshed = frame(host, 'mac');
   assert.notEqual(refreshed.element, original.element);
   assert.notEqual(refreshed.componentKey, original.componentKey);
-  assert.equal(refreshed.props.src, 'http://192.0.2.10:31990/');
+  assert.equal(refreshed.props.src, 'http://127.0.0.1:9001/');
   assert.equal(loading(host), 1, 'old loaded state must not hide the new-page loading overlay');
   original.props.onError();
   // A late child callback is a public component input, not an internal helper mock.
@@ -644,4 +648,69 @@ test('controlled remote acknowledges probes from its parent only and stops respo
   dispose();
   browser.emit('message', { source: browser.window.parent, data });
   assert.equal(messages.length, 1);
+});
+
+test('forwarded shortcuts open workbench modals and controlled host actions invoke layout callbacks while preserving the iframe', async (t) => {
+  const selectedPanels = [];
+  let sidebarToggled = 0;
+  let activePanelId = null;
+  const shellProps = {
+    selectPanel: (id) => { selectedPanels.push(id); },
+    toggleSidebar: () => { sidebarToggled++; },
+    collapseSidebar() {},
+    expandSidebar() {},
+    usePanelInfo: (selector) => selector({ activePanelId }),
+  };
+  const { browser, host } = await shell(t, state([device('mac')]), shellProps);
+  await openStage(host, browser, 'mac');
+  const original = frame(host, 'mac');
+  assert.ok(original);
+  assert.equal(original.props.style.display, 'block');
+  await documentLoaded(original, browser, host);
+
+  browser.emit('message', {
+    source: original.element.contentWindow,
+    data: { source: 'dsh-au', type: 'shortcut-action', action: 'menu.open' },
+  });
+  await browser.settle(host);
+  let modal = host.nodes((node) => node.type === host.exported.UnifiedWorkbenchModal)[0];
+  assert.ok(modal, 'forwarded menu.open opens UnifiedWorkbenchModal');
+  assert.equal(modal.props.initialTab, 'fav');
+
+  browser.emit('message', {
+    source: original.element.contentWindow,
+    data: { source: 'dsh-au', type: 'shortcut-action', action: 'services.open' },
+  });
+  await browser.settle(host);
+  modal = host.nodes((node) => node.type === host.exported.UnifiedWorkbenchModal)[0];
+  assert.ok(modal, 'forwarded services.open switches UnifiedWorkbenchModal tab');
+  assert.equal(modal.props.initialTab, 'services');
+  modal.props.onClose();
+  await browser.settle(host);
+  assert.equal(host.nodes((node) => node.type === host.exported.UnifiedWorkbenchModal).length, 0);
+
+  browser.emit('message', {
+    source: original.element.contentWindow,
+    data: { source: 'dsh-au', type: 'dsh-au:controlled-host-action', action: 'toggle-sidebar' },
+  });
+  await browser.settle(host);
+  assert.equal(sidebarToggled, 1, 'controlled toggle-sidebar invokes host toggleSidebar');
+  assert.equal(frame(host, 'mac').element, original.element);
+
+  browser.emit('message', {
+    source: original.element.contentWindow,
+    data: { source: 'dsh-au', type: 'dsh-au:controlled-host-action', action: 'select-panel', panelId: 'plugins' },
+  });
+  await browser.settle(host);
+  assert.equal(selectedPanels.at(-1), 'plugins', 'controlled select-panel invokes host selectPanel with panelId');
+  assert.equal(frame(host, 'mac').element, original.element, 'stage iframe element is preserved');
+  assert.equal(frame(host, 'mac').props.style.display, 'none', 'stage iframe is hidden when switched to host panel');
+
+  await openStage(host, browser, 'mac');
+  assert.equal(frame(host, 'mac').props.style.display, 'block');
+  activePanelId = 'settings';
+  host.mount(host.exported.AuFleetShell, shellProps);
+  await browser.settle(host);
+  assert.equal(frame(host, 'mac').element, original.element, 'iframe element is preserved when activePanelId changes');
+  assert.equal(frame(host, 'mac').props.style.display, 'none', 'stage iframe is hidden when host panel is active');
 });

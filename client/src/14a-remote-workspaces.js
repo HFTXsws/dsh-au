@@ -1161,13 +1161,13 @@
 
       /**
        * 判断在远端舞台激活态下，点击侧边栏目标是否应自动将右侧舞台切回本机：
-       * 命中原生本地工作区行、本地会话行或顶栏「新建对话」按钮，且不在远端工作区挂载点或远端原生行内。
+       * 命中原生本地工作区行、本地会话行、顶栏「新建对话」按钮或侧栏面板按钮（插件市场、设置等），且不在远端工作区挂载点或远端原生行内。
        */
       function shouldSwitchToLocalOnSidebarClick(target, doc = typeof document !== 'undefined' ? document : null) {
         if (!target || typeof target.closest !== 'function') return false;
         const activeAttr = doc?.documentElement?.getAttribute?.('data-dsh-au-remote-active');
         if (activeAttr !== 'true') return false;
-        if (!target.closest('[class*="_sidebarCol"], [class*="_regionArea"], [data-sidebar-header-controls], aside[data-slot="sidebar"]')) return false;
+        if (!target.closest('[class*="_sidebarCol"], [class*="_regionArea"], [class*="_settingsArea"], [data-sidebar-header-controls], aside[data-slot="sidebar"]')) return false;
         if (target.closest(`[${MOUNT_ATTR}="1"]`)) return false;
         if (target.closest(`[data-row-key^="workspace:${NATIVE_REMOTE_WS_PREFIX}"]`)) return false;
         const wsRow = target.closest('[data-row-key^="workspace:"]');
@@ -1183,7 +1183,7 @@
         }
         return Boolean(
           target.closest(
-            '[data-row-key^="workspace:"], [data-row-key^="session:"], button[class*="_newSession"], button[class*="_brand"], [data-sidebar-header-controls] button:last-child'
+            '[data-row-key^="workspace:"], [data-row-key^="session:"], button[class*="_newSession"], button[class*="_brand"], [data-sidebar-header-controls] button:last-child, button[class*="_panelRow"], [class*="_panelRow"], [data-panel-id], [class*="_settingsArea"] button, button[class*="_settings"], a[href]'
           )
         );
       }
@@ -3416,6 +3416,19 @@
               }
               return;
             }
+            // 当处于远端 DSH 激活态且无参触发新建对话（如快捷键 Ctrl+N / Cmd+N）时，直接在当前激活的远端工作区新建对话
+            if (!workspaceId && store.activeDeviceId && store.activeDeviceId !== 'local') {
+              const merged = rebuildNativeRemoteRegistry();
+              const selectedWsKey = store.selectedWorkspaceByDevice.get(store.activeDeviceId) || '';
+              const targetWs = merged.visible.find((w) => w?.deviceId === store.activeDeviceId && (!selectedWsKey || w.key === selectedWsKey))
+                || merged.visible.find((w) => w?.deviceId === store.activeDeviceId)
+                || null;
+              if (targetWs) {
+                const nativeWsId = targetWs.nativeWorkspaceId || toNativeRemoteWorkspaceId(targetWs.deviceId, targetWs.workspaceId);
+                uiWorkspace?.view?.setGroupExpanded?.(nativeWsId, true);
+                return activateRemoteWorkspace(targetWs, { createNew: true });
+              }
+            }
             switchBackToLocalIfNeeded('startSession');
             const started = origStartSession(workspaceId, ...rest);
             if (typeof featuresStore !== 'undefined' && featuresStore.snapshot.fullAccessByDefault) {
@@ -4426,14 +4439,15 @@
           const onSidebarCaptureClick = (event) => {
             const target = event?.target;
             if (!shouldSwitchToLocalOnSidebarClick(target, typeof document !== 'undefined' ? document : null)) return;
+            const preservePanel = Boolean(target?.closest?.('button[class*="_panelRow"], [class*="_panelRow"], [data-panel-id], [class*="_settingsArea"] button, button[class*="_settings"], a[href]'));
             cancelRemoteNavigation(store.activeDeviceId);
             store.createSessionSeq = (Number(store.createSessionSeq) || 0) + 1;
             store.activeDeviceId = null;
             pruneActiveInteractedSessions('');
             notifyStoreListeners();
             if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
-              // 侧栏捕获点击切回本机，标记来源便于和自动切回区分。
-              window.dispatchEvent(new CustomEvent(DEVICE_SELECT_EVENT, { detail: { deviceId: 'local', reason: 'sidebar-click' } }));
+              // 侧栏捕获点击切回本机，标记来源便于和自动切回区分；点击面板项时保留宿主即将切换的面板。
+              window.dispatchEvent(new CustomEvent(DEVICE_SELECT_EVENT, { detail: { deviceId: 'local', reason: 'sidebar-click', preservePanel } }));
             }
           };
 

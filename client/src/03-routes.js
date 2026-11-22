@@ -58,6 +58,8 @@
 
     function getRouteTargetUrl(route, useDirectNavigation) {
       if (!route) return '';
+      // 局域网桥接同样启用了接入密码校验；本机环境优先走自动注入凭据的回环代理端口，避免内嵌 iframe 因 401 变黑屏。
+      if (!useDirectNavigation && route.proxyUrl) return buildRemoteTargetUrl(route);
       if (route.kind === 'lan' || route.transport === 'lan') return route.url || route.originUrl || '';
       return useDirectNavigation ? (route.originUrl || route.url || '') : buildRemoteTargetUrl(route);
     }

@@ -186,7 +186,10 @@ test('受控 iframe 桥：按生效键位转发，收到外层推送后立即换
   assert.deepEqual(posted.pop(), { source: 'dsh-au', type: 'shortcut-action', action: 'dsh.reload' });
   assert.equal(press('F4', { ctrl: true, alt: true }), true);
   assert.deepEqual(posted.pop(), { source: 'dsh-au', type: 'shortcut-action', action: 'dsh.restart' });
-  assert.equal(press('Digit9', { alt: true }), false, '菜单快捷键不转发，也不吞掉按键');
+  assert.equal(press('Digit9', { alt: true }), true);
+  assert.deepEqual(posted.pop(), { source: 'dsh-au', type: 'shortcut-action', action: 'menu.open' });
+  assert.equal(press('Digit0', { alt: true }), true);
+  assert.deepEqual(posted.pop(), { source: 'dsh-au', type: 'shortcut-action', action: 'services.open' });
   assert.equal(posted.length, 0);
 
   const push = (source, overrides, shortcutsEnabled = true) => {
@@ -238,6 +241,8 @@ test('设置页与外壳接入快捷键管理的关键源码', () => {
   assert.match(code, /event\.data\.type === SHORTCUT_ACTION_MESSAGE && event\.data\.action === 'device\.refresh'/);
   assert.match(code, /event\.data\.type === SHORTCUT_ACTION_MESSAGE && event\.data\.action === 'dsh\.reload'/);
   assert.match(code, /event\.data\.type === SHORTCUT_ACTION_MESSAGE && event\.data\.action === 'dsh\.restart'/);
+  assert.match(code, /event\.data\.type === SHORTCUT_ACTION_MESSAGE && event\.data\.action === 'menu\.open'/);
+  assert.match(code, /event\.data\.type === SHORTCUT_ACTION_MESSAGE && event\.data\.action === 'services\.open'/);
   assert.match(code, /findShortcutAction\(event\) !== 'todo\.cycle'/);
   assert.match(code, /findShortcutAction\(event\) !== 'todo\.toggle'/);
 });

@@ -1142,8 +1142,8 @@ window.__ModuleLoader__.load({
       { id: 'device.next', label: '切换到右侧设备', defaults: keyBinding('BracketRight', { alt: true }), forward: true },
       { id: 'device.previous.tab', label: '切换到左侧设备 (备用)', defaults: keyBinding('Tab', { ctrl: true, shift: true }), forward: true },
       { id: 'device.next.tab', label: '切换到右侧设备 (备用)', defaults: keyBinding('Tab', { ctrl: true }), forward: true },
-      { id: 'menu.open', label: '打开统一菜单', defaults: platformShortcut(keyBinding('Digit9', { ctrl: true }), keyBinding('Digit9', { alt: true })) },
-      { id: 'services.open', label: '打开后台服务', defaults: platformShortcut(keyBinding('Digit0', { ctrl: true }), keyBinding('Digit0', { alt: true })) },
+      { id: 'menu.open', label: '打开统一菜单', defaults: platformShortcut(keyBinding('Digit9', { ctrl: true }), keyBinding('Digit9', { alt: true })), forward: true },
+      { id: 'services.open', label: '打开后台服务', defaults: platformShortcut(keyBinding('Digit0', { ctrl: true }), keyBinding('Digit0', { alt: true })), forward: true },
       { id: 'todo.toggle', label: '展开 / 收起待办面板', defaults: keyBinding('Backslash', { shift: true }), forward: true },
       { id: 'todo.cycle', label: '轮流跳转待处理对话', defaults: platformShortcut(keyBinding('Delete', { meta: true }), keyBinding('Delete', { ctrl: true })), forward: true },
       { id: 'device.refresh', label: '刷新远程DSH', defaults: keyBinding('F5'), forward: true },
@@ -3075,6 +3075,8 @@ window.__ModuleLoader__.load({
 
     function getRouteTargetUrl(route, useDirectNavigation) {
       if (!route) return '';
+      // 局域网桥接同样启用了接入密码校验；本机环境优先走自动注入凭据的回环代理端口，避免内嵌 iframe 因 401 变黑屏。
+      if (!useDirectNavigation && route.proxyUrl) return buildRemoteTargetUrl(route);
       if (route.kind === 'lan' || route.transport === 'lan') return route.url || route.originUrl || '';
       return useDirectNavigation ? (route.originUrl || route.url || '') : buildRemoteTargetUrl(route);
     }
@@ -7431,7 +7433,20 @@ window.__ModuleLoader__.load({
      * 常驻壳层：设备栏插入中心列顶部，远程 iframe 插入 shell.overlay。
      * 两处都是 root 作用域，因此切换本机对话与其它主面板时不会卸载 iframe。
      */
-    function AuFleetShell({ selectPanel, collapseSidebar, expandSidebar, usePanelInfo, openLocalSession, readLocalSessionId }) {
+    function AuFleetShell({ selectPanel, collapseSidebar, expandSidebar, toggleSidebar, usePanelInfo, openLocalSession, readLocalSessionId }) {
+      const doToggleSidebar = useCallback(() => {
+        if (typeof toggleSidebar === 'function') {
+          toggleSidebar();
+        } else if (document.querySelector('[data-sidebar-collapsed]')) {
+          expandSidebar();
+        } else {
+          collapseSidebar();
+        }
+      }, [toggleSidebar, expandSidebar, collapseSidebar]);
+      const toggleSidebarRef = useRef(doToggleSidebar);
+      toggleSidebarRef.current = doToggleSidebar;
+      const selectPanelRef = useRef(selectPanel);
+      selectPanelRef.current = selectPanel;
       const [state, setState] = useState({ self: null, devices: [], lanPeers: [], remotes: [] });
       const [activeId, setActiveId] = useState(null);
       const [openedIds, setOpenedIds] = useState([]);
@@ -7702,9 +7717,17 @@ window.__ModuleLoader__.load({
       }, [hosts]);
 
       // 兼容侧栏既有「Au 多机」入口：点击后回到会话主面板，常驻栏不发生重建。
+      // 点击设置、插件市场等其他主面板时，切回本机视图，避免远端舞台遮盖设置/插件面板。
       useEffect(() => {
-        if (activePanelId === PANEL_ID) selectPanel(null);
-      }, [activePanelId, selectPanel]);
+        if (activePanelId === PANEL_ID) {
+          selectPanel(null);
+          return;
+        }
+        if (activePanelId && activeId) {
+          clearStageTransition();
+          setActiveId(null);
+        }
+      }, [activePanelId, activeId, clearStageTransition, selectPanel]);
 
       // 确保当前选中的设备标签始终加入保活挂载集合，并在 html 根节点标记远端舞台激活态供本机移动端插件隐藏悬浮按钮。
       useEffect(() => {
@@ -7830,7 +7853,7 @@ window.__ModuleLoader__.load({
       const activeUnavailable = Boolean(activeDev && !loadedMap[activeFrameKey] && (activeDev.status === 'offline' || failedLoadDevices[activeDev.id]));
       const activeLoading = Boolean(activeDev && !activeNeedsCredentials && !activeUnavailable && !loadedMap[activeFrameKey]);
       const lanOn = state.self?.lanShareEnabled !== false;
-      const showStage = activeDev !== null && stageRect !== null;
+      const showStage = activeDev !== null && stageRect !== null && (!activePanelId || activePanelId === PANEL_ID);
       useEffect(() => {
         if (!hosts || !state.self || (activeId && !activeDev)) return;
         const frame = activeId
@@ -8049,7 +8072,7 @@ window.__ModuleLoader__.load({
       }, []);
 
       // reason 标明是谁让画面回到本机（顶栏点击、快捷键、设备移除、外部事件等），用于排查“自动切回本机”。
-      const selectLocal = useCallback(({ preserveTopbar = false, reason = 'show-local', trigger = '', sessionId = '', knownRemote, recordCount } = {}) => {
+      const selectLocal = useCallback(({ preserveTopbar = false, preservePanel = false, reason = 'show-local', trigger = '', sessionId = '', knownRemote, recordCount } = {}) => {
         reportClientEvent('select-local', 'local', {
           fromRouteId: openedRouteIdsRef.current.get(activeId) || '',
           reason,
@@ -8064,7 +8087,7 @@ window.__ModuleLoader__.load({
         if (!preserveTopbar) setTopbarCollapsed(false);
         // 返回本机对话时恢复本机导航；仅在收起状态调用，避免误反向折叠。
         expandSidebar();
-        selectPanel(null);
+        if (!preservePanel) selectPanel(null);
       }, [activeId, clearStageTransition, expandSidebar, selectPanel]);
       const selectDevice = useCallback((id, { preserveTopbar = false, targetUrl = '', navigateTopLevel = false } = {}) => {
         const selectedDevice = devices.find((device) => device.id === id);
@@ -8256,6 +8279,7 @@ window.__ModuleLoader__.load({
             // 外部派发方（待办、侧栏拦截等）可在 detail.reason 等字段里说明来源，原样带进日志。
             selectLocal({
               preserveTopbar: true,
+              preservePanel: event.detail?.preservePanel === true,
               reason: typeof event.detail?.reason === 'string' && event.detail.reason ? event.detail.reason : 'select-event',
               trigger: typeof event.detail?.trigger === 'string' ? event.detail.trigger : '',
               sessionId: typeof event.detail?.sessionId === 'string' ? event.detail.sessionId : '',
@@ -8340,6 +8364,20 @@ window.__ModuleLoader__.load({
             if (isDeviceSwitchMessageFromStage(event.source, frames)) triggerDshReload();
           } else if (event.data.type === SHORTCUT_ACTION_MESSAGE && event.data.action === 'dsh.restart') {
             if (isDeviceSwitchMessageFromStage(event.source, frames)) triggerDshRestart();
+          } else if (event.data.type === SHORTCUT_ACTION_MESSAGE && event.data.action === 'menu.open') {
+            if (isDeviceSwitchMessageFromStage(event.source, frames)) dispatchWorkbenchShortcut('fav');
+          } else if (event.data.type === SHORTCUT_ACTION_MESSAGE && event.data.action === 'services.open') {
+            if (isDeviceSwitchMessageFromStage(event.source, frames)) dispatchWorkbenchShortcut('services');
+          } else if (event.data.type === 'dsh-au:controlled-host-action') {
+            if (isDeviceSwitchMessageFromStage(event.source, frames)) {
+              if (event.data.action === 'toggle-sidebar') {
+                toggleSidebarRef.current?.();
+              } else if (event.data.action === 'select-panel' && typeof event.data.panelId === 'string') {
+                selectLocal({ preserveTopbar: true, preservePanel: true, reason: 'controlled-panel-shortcut' });
+                selectPanelRef.current?.(event.data.panelId);
+              }
+            }
+            return;
           } else if (event.data.type === 'remote-session-confirmed' || event.data.type === 'frame-ready') {
             clearStageTransition();
             if (event.data.type === 'remote-session-confirmed') {
@@ -8365,12 +8403,12 @@ window.__ModuleLoader__.load({
         };
       }, [clearFailedLoad, clearStageTransition, compactMobile, devices, hosts, selectDevice, selectLocal, selectRelativeDevice, state.self?.deviceId, state.self?.instanceId]);
 
-      // 统一菜单与后台服务的快捷键（默认 Ctrl+Delete、Shift+\\，可在设置页修改）由捕获阶段监听转为同一事件。
+      // 统一菜单与后台服务的快捷键（默认 Alt+9、Alt+0，可在设置页修改）由宿主快捷键服务与捕获阶段监听共同转为同一事件。
       useEffect(() => {
         const onWorkbenchShortcut = (event) => {
           const tab = event.detail?.tab;
-          if (tab === 'fav') setWorkbenchTab((prev) => (prev ? null : 'fav'));
-          else if (tab === 'services') setWorkbenchTab('services');
+          if (tab === 'fav') setWorkbenchTab((prev) => (prev === 'fav' ? null : 'fav'));
+          else if (tab === 'services') setWorkbenchTab((prev) => (prev === 'services' ? null : 'services'));
         };
         const onKey = (event) => {
           if (event.defaultPrevented) return;
@@ -15153,13 +15191,13 @@ window.__ModuleLoader__.load({
 
       /**
        * 判断在远端舞台激活态下，点击侧边栏目标是否应自动将右侧舞台切回本机：
-       * 命中原生本地工作区行、本地会话行或顶栏「新建对话」按钮，且不在远端工作区挂载点或远端原生行内。
+       * 命中原生本地工作区行、本地会话行、顶栏「新建对话」按钮或侧栏面板按钮（插件市场、设置等），且不在远端工作区挂载点或远端原生行内。
        */
       function shouldSwitchToLocalOnSidebarClick(target, doc = typeof document !== 'undefined' ? document : null) {
         if (!target || typeof target.closest !== 'function') return false;
         const activeAttr = doc?.documentElement?.getAttribute?.('data-dsh-au-remote-active');
         if (activeAttr !== 'true') return false;
-        if (!target.closest('[class*="_sidebarCol"], [class*="_regionArea"], [data-sidebar-header-controls], aside[data-slot="sidebar"]')) return false;
+        if (!target.closest('[class*="_sidebarCol"], [class*="_regionArea"], [class*="_settingsArea"], [data-sidebar-header-controls], aside[data-slot="sidebar"]')) return false;
         if (target.closest(`[${MOUNT_ATTR}="1"]`)) return false;
         if (target.closest(`[data-row-key^="workspace:${NATIVE_REMOTE_WS_PREFIX}"]`)) return false;
         const wsRow = target.closest('[data-row-key^="workspace:"]');
@@ -15175,7 +15213,7 @@ window.__ModuleLoader__.load({
         }
         return Boolean(
           target.closest(
-            '[data-row-key^="workspace:"], [data-row-key^="session:"], button[class*="_newSession"], button[class*="_brand"], [data-sidebar-header-controls] button:last-child'
+            '[data-row-key^="workspace:"], [data-row-key^="session:"], button[class*="_newSession"], button[class*="_brand"], [data-sidebar-header-controls] button:last-child, button[class*="_panelRow"], [class*="_panelRow"], [data-panel-id], [class*="_settingsArea"] button, button[class*="_settings"], a[href]'
           )
         );
       }
@@ -17408,6 +17446,19 @@ window.__ModuleLoader__.load({
               }
               return;
             }
+            // 当处于远端 DSH 激活态且无参触发新建对话（如快捷键 Ctrl+N / Cmd+N）时，直接在当前激活的远端工作区新建对话
+            if (!workspaceId && store.activeDeviceId && store.activeDeviceId !== 'local') {
+              const merged = rebuildNativeRemoteRegistry();
+              const selectedWsKey = store.selectedWorkspaceByDevice.get(store.activeDeviceId) || '';
+              const targetWs = merged.visible.find((w) => w?.deviceId === store.activeDeviceId && (!selectedWsKey || w.key === selectedWsKey))
+                || merged.visible.find((w) => w?.deviceId === store.activeDeviceId)
+                || null;
+              if (targetWs) {
+                const nativeWsId = targetWs.nativeWorkspaceId || toNativeRemoteWorkspaceId(targetWs.deviceId, targetWs.workspaceId);
+                uiWorkspace?.view?.setGroupExpanded?.(nativeWsId, true);
+                return activateRemoteWorkspace(targetWs, { createNew: true });
+              }
+            }
             switchBackToLocalIfNeeded('startSession');
             const started = origStartSession(workspaceId, ...rest);
             if (typeof featuresStore !== 'undefined' && featuresStore.snapshot.fullAccessByDefault) {
@@ -18418,14 +18469,15 @@ window.__ModuleLoader__.load({
           const onSidebarCaptureClick = (event) => {
             const target = event?.target;
             if (!shouldSwitchToLocalOnSidebarClick(target, typeof document !== 'undefined' ? document : null)) return;
+            const preservePanel = Boolean(target?.closest?.('button[class*="_panelRow"], [class*="_panelRow"], [data-panel-id], [class*="_settingsArea"] button, button[class*="_settings"], a[href]'));
             cancelRemoteNavigation(store.activeDeviceId);
             store.createSessionSeq = (Number(store.createSessionSeq) || 0) + 1;
             store.activeDeviceId = null;
             pruneActiveInteractedSessions('');
             notifyStoreListeners();
             if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
-              // 侧栏捕获点击切回本机，标记来源便于和自动切回区分。
-              window.dispatchEvent(new CustomEvent(DEVICE_SELECT_EVENT, { detail: { deviceId: 'local', reason: 'sidebar-click' } }));
+              // 侧栏捕获点击切回本机，标记来源便于和自动切回区分；点击面板项时保留宿主即将切换的面板。
+              window.dispatchEvent(new CustomEvent(DEVICE_SELECT_EVENT, { detail: { deviceId: 'local', reason: 'sidebar-click', preservePanel } }));
             }
           };
 
@@ -19970,6 +20022,36 @@ window.__ModuleLoader__.load({
       // 被控制端由外层 DSH-AU 统一提供设备栏；仅保留按键桥以穿透 iframe 的焦点边界。
       if (isControlledFrame()) {
         controlledClientCtx = ctx;
+        if (ctx.layout && typeof ctx.layout.toggleSidebar === 'function') {
+          const origToggleSidebar = ctx.layout.toggleSidebar.bind(ctx.layout);
+          ctx.layout.toggleSidebar = () => {
+            try {
+              window.top?.postMessage({
+                source: 'dsh-au',
+                type: 'dsh-au:controlled-host-action',
+                action: 'toggle-sidebar',
+              }, '*');
+            } catch {}
+          };
+        }
+        if (ctx.layout && typeof ctx.layout.selectPanel === 'function') {
+          const origSelectPanel = ctx.layout.selectPanel.bind(ctx.layout);
+          ctx.layout.selectPanel = (panelId) => {
+            if (panelId && panelId !== PANEL_ID) {
+              try { origSelectPanel(null); } catch {}
+              try {
+                window.top?.postMessage({
+                  source: 'dsh-au',
+                  type: 'dsh-au:controlled-host-action',
+                  action: 'select-panel',
+                  panelId,
+                }, '*');
+              } catch {}
+              return;
+            }
+            return origSelectPanel(panelId);
+          };
+        }
         ctx.effect(() => installModelShortcuts(ctx), 'dsh-au: controlled model shortcuts');
         ctx.effect(() => initShortcutStore(), 'dsh-au: shortcut store');
         ctx.effect(() => installControlledFrameShortcutBridge(), 'dsh-au: controlled frame shortcut bridge');
@@ -20053,12 +20135,28 @@ window.__ModuleLoader__.load({
         const registerWorkbenchShortcut = (id, label, tab) => {
           try {
             // 注意：DSH 内置插件 @deepseek-ai/dsh-client-ui-sidebar-right 的 pane.split 占用了 Primary+Backslash 默认键位且未加 try/catch；
-            // 因此此处 defaults 传空对象避免抢占宿主内置注册表，实际键位由捕获阶段 keydown 监听按动作表直接处理。
+            // 因此若自定义键位为 Backslash 或 Tab 则 defaults 传空对象由 keydown 兜底；其余键位（如默认 Alt+9/Alt+0）正常向宿主注册 defaults，使桌面端在远端未升级插件时也能直接拦截 iframe 按键。
+            const actionId = tab === 'fav' ? 'menu.open' : 'services.open';
+            const binding = effectiveShortcutBinding(actionId);
+            const platform = ctx.shortcuts?.platform;
+            let defaults = {};
+            if (binding && binding.code && binding.code !== 'Backslash' && binding.code !== 'Tab') {
+              const modifiers = ['ctrl', 'alt', 'shift', 'meta'].filter((key) => binding[key]).map((key) => (key === 'ctrl' ? 'control' : key));
+              if (platform) {
+                defaults = { [`desktop:${platform}`]: { code: binding.code, modifiers } };
+              } else {
+                defaults = {
+                  'desktop:windows': { code: binding.code, modifiers },
+                  'desktop:macos': { code: binding.code, modifiers },
+                  'desktop:linux': { code: binding.code, modifiers },
+                };
+              }
+            }
             return ctx.shortcuts.register({
               id,
               label: () => label,
               aliases: [id, tab === 'fav' ? 'open command menu' : 'open background services'],
-              defaults: {},
+              defaults,
               regions: ['page', 'editable'],
               modals: [],
               resolve: () => ({ status: 'handled', run: () => dispatchWorkbenchShortcut(tab) }),
@@ -20098,6 +20196,7 @@ window.__ModuleLoader__.load({
             id: 'dsh-au-shell',
             inject: () => ({
               selectPanel: ctx.layout.selectPanel.bind(ctx.layout),
+              toggleSidebar: () => ctx.layout.toggleSidebar(),
               openLocalSession: (sessionId) => {
                 const workspace = ctx.get?.('uiWorkspace') || ctx.uiWorkspace;
                 if (typeof workspace?.openSession !== 'function') return false;

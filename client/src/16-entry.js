@@ -8,6 +8,36 @@
       // 被控制端由外层 DSH-AU 统一提供设备栏；仅保留按键桥以穿透 iframe 的焦点边界。
       if (isControlledFrame()) {
         controlledClientCtx = ctx;
+        if (ctx.layout && typeof ctx.layout.toggleSidebar === 'function') {
+          const origToggleSidebar = ctx.layout.toggleSidebar.bind(ctx.layout);
+          ctx.layout.toggleSidebar = () => {
+            try {
+              window.top?.postMessage({
+                source: 'dsh-au',
+                type: 'dsh-au:controlled-host-action',
+                action: 'toggle-sidebar',
+              }, '*');
+            } catch {}
+          };
+        }
+        if (ctx.layout && typeof ctx.layout.selectPanel === 'function') {
+          const origSelectPanel = ctx.layout.selectPanel.bind(ctx.layout);
+          ctx.layout.selectPanel = (panelId) => {
+            if (panelId && panelId !== PANEL_ID) {
+              try { origSelectPanel(null); } catch {}
+              try {
+                window.top?.postMessage({
+                  source: 'dsh-au',
+                  type: 'dsh-au:controlled-host-action',
+                  action: 'select-panel',
+                  panelId,
+                }, '*');
+              } catch {}
+              return;
+            }
+            return origSelectPanel(panelId);
+          };
+        }
         ctx.effect(() => installModelShortcuts(ctx), 'dsh-au: controlled model shortcuts');
         ctx.effect(() => initShortcutStore(), 'dsh-au: shortcut store');
         ctx.effect(() => installControlledFrameShortcutBridge(), 'dsh-au: controlled frame shortcut bridge');
@@ -91,12 +121,28 @@
         const registerWorkbenchShortcut = (id, label, tab) => {
           try {
             // 注意：DSH 内置插件 @deepseek-ai/dsh-client-ui-sidebar-right 的 pane.split 占用了 Primary+Backslash 默认键位且未加 try/catch；
-            // 因此此处 defaults 传空对象避免抢占宿主内置注册表，实际键位由捕获阶段 keydown 监听按动作表直接处理。
+            // 因此若自定义键位为 Backslash 或 Tab 则 defaults 传空对象由 keydown 兜底；其余键位（如默认 Alt+9/Alt+0）正常向宿主注册 defaults，使桌面端在远端未升级插件时也能直接拦截 iframe 按键。
+            const actionId = tab === 'fav' ? 'menu.open' : 'services.open';
+            const binding = effectiveShortcutBinding(actionId);
+            const platform = ctx.shortcuts?.platform;
+            let defaults = {};
+            if (binding && binding.code && binding.code !== 'Backslash' && binding.code !== 'Tab') {
+              const modifiers = ['ctrl', 'alt', 'shift', 'meta'].filter((key) => binding[key]).map((key) => (key === 'ctrl' ? 'control' : key));
+              if (platform) {
+                defaults = { [`desktop:${platform}`]: { code: binding.code, modifiers } };
+              } else {
+                defaults = {
+                  'desktop:windows': { code: binding.code, modifiers },
+                  'desktop:macos': { code: binding.code, modifiers },
+                  'desktop:linux': { code: binding.code, modifiers },
+                };
+              }
+            }
             return ctx.shortcuts.register({
               id,
               label: () => label,
               aliases: [id, tab === 'fav' ? 'open command menu' : 'open background services'],
-              defaults: {},
+              defaults,
               regions: ['page', 'editable'],
               modals: [],
               resolve: () => ({ status: 'handled', run: () => dispatchWorkbenchShortcut(tab) }),
@@ -136,6 +182,7 @@
             id: 'dsh-au-shell',
             inject: () => ({
               selectPanel: ctx.layout.selectPanel.bind(ctx.layout),
+              toggleSidebar: () => ctx.layout.toggleSidebar(),
               openLocalSession: (sessionId) => {
                 const workspace = ctx.get?.('uiWorkspace') || ctx.uiWorkspace;
                 if (typeof workspace?.openSession !== 'function') return false;
