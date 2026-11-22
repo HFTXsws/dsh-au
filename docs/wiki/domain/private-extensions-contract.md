@@ -25,6 +25,7 @@
 | `id` | `string` | 是 | 匹配 `^[a-z0-9][a-z0-9-]{0,47}$`，全局唯一；前端 Tab 标识为 `ext:<id>` |
 | `title` | `string` | 是 | 左侧导航栏显示名称 |
 | `order` | `number` | 否 | 排序权重（升序，默认 `100`；常用推荐 `20~50`） |
+| `surfaces` | `string[]` | 否 | 挂载位置数组，可选 `'workbench'`（工作台弹窗页签，默认）与 `'sidebar'`（左侧边栏工作区树 + 右侧主舞台）；支持传 `sidebar: true` 简写 |
 | `iconSvg` | `string` | 否 | 16×16 线性 SVG 字符串；缺省使用通用扩展图标 |
 | `clientFile` | `string` | 否 | 默认 `client.js` |
 | `styleFile` | `string` | 否 | 默认 `styles.css` |
@@ -52,9 +53,12 @@ return function useExtension({ id, title, active, callExt }) {
 };
 ```
 
-- `active`：`boolean`，当前工作台是否停留在 `ext:<id>` 标签页；建议仅在 `active` 为 `true` 时按需拉取远端数据。
+- `active`：`boolean`，当前工作台是否停留在 `ext:<id>` 标签页（或侧边栏扩展的主舞台是否激活）；建议仅在需要时按需拉取远端数据。
 - `callExt(subAction, payload)`：自动发送 `{ action: 'extAction', extId: id, subAction, payload }` 到 `/dsh-au/api` 并返回 JSON 结果。
-- 导出形式兼容直接 `return function useExtension(...)` 与 `return { useExtension }` 两种写法；`useExtension` 返回对象必须提供 `renderCenter()` 函数，若省略 `renderInspector` 或返回 `null`，右侧详情面板自动隐藏或显示默认占位。
+- `selectStageItem(itemId)` / `clearStage()` / `activeStageItem`：当 `surfaces` 含 `'sidebar'` 时由宿主壳层注入，用于从左侧边栏树节点一键激活右侧主舞台（`.dsh-au-stage`）并传入选中项 ID，或切回本机默认会话。
+- 导出形式兼容直接 `return function useExtension(...)` 与 `return { useExtension }` 两种写法：
+  - 工作台扩展（`surfaces` 含 `'workbench'`）返回对象必须提供 `renderCenter()` 函数，可选 `renderInspector()`；
+  - 侧边栏工作区扩展（`surfaces` 含 `'sidebar'`）返回对象必须提供 `renderSidebar()`（挂载到左侧栏工作区树底部，与「本机 / 远程设备」分组同级）与 `renderStage({ itemId, selectStageItem, clearStage })`（或复用 `renderCenter()`，挂载到右侧主舞台）。
 - **宿主运行时 Hook 约束**：`client/src/*.js` 合并为单文件作用域后共用 [client/src/01-runtime.js](../../../client/src/01-runtime.js) 顶部的 `const { ... } = React;` 解构；在工作台扩展宿主或其它前端模块新引入 `useMemo` 等 Hook 时，必须同步补进 `01-runtime.js` 并重新生成 `client/client.js`，否则会触发 `ReferenceError` 导致 `shell.overlay` 崩溃与全局快捷键失效（已由 `tests/private-extensions.test.mjs` 自动拦截）。
 
 ## 后端契约（`server.js`）

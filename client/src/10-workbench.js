@@ -58,6 +58,7 @@
         machineDshPluginProfiles: snap.machineDshPluginProfiles || cachedWorkbenchSnapshot?.machineDshPluginProfiles,
         currentMachineDshPluginIds: snap.currentMachineDshPluginIds || cachedWorkbenchSnapshot?.currentMachineDshPluginIds,
         localBinding: snap.localBinding || cachedWorkbenchSnapshot?.localBinding,
+        privateExtensions: snap.privateExtensions || cachedWorkbenchSnapshot?.privateExtensions,
       };
     }
 
@@ -119,7 +120,8 @@
       parentExtSeqRef.current += 1;
       const [, setExtRenderTick] = useState(0);
       const triggerExtRender = useCallback(() => setExtRenderTick((n) => n + 1), []);
-      const privateExtensions = Array.isArray(wb?.privateExtensions) ? wb.privateExtensions : [];
+      const privateExtensions = (Array.isArray(wb?.privateExtensions) ? wb.privateExtensions : [])
+        .filter((ext) => !Array.isArray(ext?.surfaces) || ext.surfaces.includes('workbench'));
 
       const refreshWorkbench = useCallback(async (force = false) => {
         const refreshRevision = ++refreshRevisionRef.current;

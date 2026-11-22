@@ -7,6 +7,7 @@ import {
   invokePrivateExtensionAction,
   listPrivateExtensionsForClient,
   loadPrivateExtensionDescriptors,
+  normalizeExtensionSurfaces,
   runPrivateExtensionsDoctor,
 } from '../lib/private-extensions.js';
 
@@ -111,6 +112,51 @@ test('runPrivateExtensionsDoctor 校验正常扩展与各类异常（缺 handleA
     const notFound = await runPrivateExtensionsDoctor({ syncRepoRoot: root, extId: 'missing' });
     assert.equal(notFound.ok, false);
     assert.match(notFound.issues[0], /未找到扩展/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('支持声明 surfaces: ["sidebar"] 的侧边栏与主舞台扩展及 Doctor 校验', async () => {
+  assert.deepEqual(normalizeExtensionSurfaces({}), ['workbench']);
+  assert.deepEqual(normalizeExtensionSurfaces({ sidebar: true }), ['sidebar']);
+  assert.deepEqual(normalizeExtensionSurfaces({ surfaces: ['sidebar', 'workbench'] }), ['sidebar', 'workbench']);
+
+  const root = mkdtempSync(join(tmpdir(), 'dsh-au-sb-ext-'));
+  const sbOkDir = join(root, 'dsh-sync', 'extensions', 'sb-ok');
+  const sbBadDir = join(root, 'dsh-sync', 'extensions', 'sb-bad');
+  mkdirSync(sbOkDir, { recursive: true });
+  mkdirSync(sbBadDir, { recursive: true });
+
+  writeFileSync(join(sbOkDir, 'extension.json'), JSON.stringify({
+    id: 'sb-ok',
+    title: '侧栏团队扩展',
+    surfaces: ['sidebar'],
+  }), 'utf8');
+  writeFileSync(join(sbOkDir, 'client.js'), 'return () => ({ renderSidebar: () => null, renderStage: () => null });', 'utf8');
+  writeFileSync(join(sbOkDir, 'server.js'), 'export async function handleAction() { return { ok: true }; }', 'utf8');
+
+  writeFileSync(join(sbBadDir, 'extension.json'), JSON.stringify({
+    id: 'sb-bad',
+    title: '缺少侧栏函数扩展',
+    surfaces: ['sidebar'],
+  }), 'utf8');
+  writeFileSync(join(sbBadDir, 'client.js'), 'return () => ({});', 'utf8');
+
+  try {
+    const clientList = listPrivateExtensionsForClient({ syncRepoRoot: root });
+    const sbOk = clientList.find((x) => x.id === 'sb-ok');
+    assert.ok(sbOk);
+    assert.deepEqual(sbOk.surfaces, ['sidebar']);
+
+    const rep = await runPrivateExtensionsDoctor({ syncRepoRoot: root });
+    assert.equal(rep.ok, false);
+    const okItem = rep.extensions.find((x) => x.id === 'sb-ok');
+    const badItem = rep.extensions.find((x) => x.id === 'sb-bad');
+    assert.equal(okItem.status, 'ok');
+    assert.equal(badItem.status, 'fail');
+    assert.ok(badItem.issues.some((m) => m.includes('renderSidebar')));
+    assert.ok(badItem.issues.some((m) => m.includes('renderStage')));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

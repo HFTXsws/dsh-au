@@ -25,6 +25,7 @@
         selectedSessionByDevice: new Map(), // deviceId -> sessionId
         selectedWorkspaceByDevice: new Map(), // deviceId -> workspaceKey
         activeDeviceId: null,
+        activeExtStage: null, // { extId, itemId } | null
         devices: [],
          localDeviceId: '',
         hiddenKeys: new Set(),
@@ -1169,6 +1170,7 @@
         if (activeAttr !== 'true') return false;
         if (!target.closest('[class*="_sidebarCol"], [class*="_regionArea"], [class*="_settingsArea"], [data-sidebar-header-controls], aside[data-slot="sidebar"]')) return false;
         if (target.closest(`[${MOUNT_ATTR}="1"]`)) return false;
+        if (target.closest('[data-dsh-au-ext-sidebar="1"]')) return false;
         if (target.closest(`[data-row-key^="workspace:${NATIVE_REMOTE_WS_PREFIX}"]`)) return false;
         const wsRow = target.closest('[data-row-key^="workspace:"]');
         if (wsRow && typeof wsRow.getAttribute === 'function') {
@@ -2520,7 +2522,10 @@
           }
         }
 
-        if (!hasRemote) {
+        const extMountNode = treeContainer.querySelector?.(':scope > [data-dsh-au-ext-sidebar="1"]');
+        if (extMountNode?.style) extMountNode.style.order = '99998';
+
+        if (!hasRemote && !extMountNode) {
           clearDeviceGroups();
           return;
         }
@@ -3108,9 +3113,10 @@
         let cachedSessSnap = null;
         sessList.getSnapshot = () => {
           const rawSess = origGetSessSnapshot() || { byId: {} };
-          const isRemoteActive = Boolean(store.activeDeviceId && store.activeDeviceId !== 'local');
+          const isRemoteActive = Boolean((store.activeDeviceId && store.activeDeviceId !== 'local') || store.activeExtStage);
           const selectedSig = [...store.selectedSessionByDevice.entries()].map(([k, v]) => `${k}:${v}`).join('|');
-          const cacheKey = `${store.revision}::${store.activeDeviceId || 'local'}::${selectedSig}`;
+          const extStageSig = store.activeExtStage ? `${store.activeExtStage.extId}:${store.activeExtStage.itemId}` : '';
+          const cacheKey = `${store.revision}::${store.activeDeviceId || 'local'}::${extStageSig}::${selectedSig}`;
           if (cachedSessSnap && cachedSessKey === cacheKey && cachedSessSnap.__rawSess === rawSess) {
             return cachedSessSnap.value;
           }
@@ -3332,10 +3338,13 @@
 
         // trigger 记录被拦截的原生动作；sessionId/recordCount 用于判断是否因远端列表暂未识别该会话而误切回本机。
         const switchBackToLocalIfNeeded = (trigger = '', sessionId = '') => {
-          if (store.activeDeviceId && store.activeDeviceId !== 'local') {
-            cancelRemoteNavigation(store.activeDeviceId);
+          if ((store.activeDeviceId && store.activeDeviceId !== 'local') || store.activeExtStage) {
+            if (store.activeDeviceId && store.activeDeviceId !== 'local') {
+              cancelRemoteNavigation(store.activeDeviceId);
+            }
             store.createSessionSeq = (Number(store.createSessionSeq) || 0) + 1;
             store.activeDeviceId = null;
+            store.activeExtStage = null;
             pruneActiveInteractedSessions('');
             notifyStoreListeners();
             if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
@@ -4555,7 +4564,18 @@
               applyServerTodoStateData(data);
             }
           };
+          const onActiveExtStageChange = (event) => {
+            store.activeExtStage = event?.detail?.activeExtStage || null;
+            notifyStoreListeners();
+          };
+          const onSidebarExtMounted = () => {
+            if (typeof document !== 'undefined') {
+              decorateSidebarDeviceGroups(document);
+            }
+          };
           window.addEventListener('dsh-au:active-device-change', onActiveDeviceChange);
+          window.addEventListener('dsh-au:active-ext-stage-change', onActiveExtStageChange);
+          window.addEventListener('dsh-au:sidebar-ext-mounted', onSidebarExtMounted);
           window.addEventListener('dsh-au:refresh-state', fetchServerRemoteWorkspaces);
           window.addEventListener('dsh-au:self-state', onSelfState);
           window.addEventListener('dsh-au:todo-state-data', onTodoStateData);
@@ -4604,6 +4624,8 @@
             observer?.disconnect();
             window.clearInterval(pollTimer);
             window.removeEventListener('dsh-au:active-device-change', onActiveDeviceChange);
+            window.removeEventListener('dsh-au:active-ext-stage-change', onActiveExtStageChange);
+            window.removeEventListener('dsh-au:sidebar-ext-mounted', onSidebarExtMounted);
             window.removeEventListener('dsh-au:refresh-state', fetchServerRemoteWorkspaces);
             window.removeEventListener('dsh-au:self-state', onSelfState);
             window.removeEventListener('dsh-au:todo-state-data', onTodoStateData);

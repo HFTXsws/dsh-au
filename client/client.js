@@ -5274,6 +5274,7 @@ window.__ModuleLoader__.load({
         machineDshPluginProfiles: snap.machineDshPluginProfiles || cachedWorkbenchSnapshot?.machineDshPluginProfiles,
         currentMachineDshPluginIds: snap.currentMachineDshPluginIds || cachedWorkbenchSnapshot?.currentMachineDshPluginIds,
         localBinding: snap.localBinding || cachedWorkbenchSnapshot?.localBinding,
+        privateExtensions: snap.privateExtensions || cachedWorkbenchSnapshot?.privateExtensions,
       };
     }
 
@@ -5335,7 +5336,8 @@ window.__ModuleLoader__.load({
       parentExtSeqRef.current += 1;
       const [, setExtRenderTick] = useState(0);
       const triggerExtRender = useCallback(() => setExtRenderTick((n) => n + 1), []);
-      const privateExtensions = Array.isArray(wb?.privateExtensions) ? wb.privateExtensions : [];
+      const privateExtensions = (Array.isArray(wb?.privateExtensions) ? wb.privateExtensions : [])
+        .filter((ext) => !Array.isArray(ext?.surfaces) || ext.surfaces.includes('workbench'));
 
       const refreshWorkbench = useCallback(async (force = false) => {
         const refreshRevision = ++refreshRevisionRef.current;
@@ -7429,6 +7431,167 @@ window.__ModuleLoader__.load({
     }
     // END planScreenLockRemoteFrames
 
+    const EXT_SIDEBAR_MOUNT_CLASS = 'dsh-au-ext-sidebar-root';
+    const EXT_SIDEBAR_MOUNT_ATTR = 'data-dsh-au-ext-sidebar';
+
+    function findSidebarWorkspaceTreeContainerForExt(doc = typeof document !== 'undefined' ? document : null) {
+      if (!doc?.querySelector) return null;
+      return (
+        doc.querySelector('[class*="_sidebarCol"] [class*="_treeBody"] div[role="tree"][class*="_list"]:not([class*="_searchTree"])')
+        || doc.querySelector('[class*="_regionArea"] [class*="_treeBody"] div[role="tree"][class*="_list"]:not([class*="_searchTree"])')
+        || doc.querySelector('[class*="_treeBody"] div[role="tree"][class*="_list"]:not([class*="_searchTree"])')
+        || doc.querySelector('aside[data-slot="sidebar"] [data-slot="sidebar.workspaces"] div[role="tree"][class*="_list"]:not([class*="_searchTree"])')
+        || doc.querySelector('aside[data-slot="sidebar"] [data-slot="sidebar.workspaces"] div[role="tree"]:not([class*="_searchTree"])')
+        || doc.querySelector('div[role="tree"][class*="_list"]:not([class*="_searchTree"])')
+      );
+    }
+
+    function ensureSidebarExtensionsMountNode(doc = typeof document !== 'undefined' ? document : null) {
+      const treeContainer = findSidebarWorkspaceTreeContainerForExt(doc);
+      if (!treeContainer || typeof doc?.createElement !== 'function') return null;
+      let mountNode = treeContainer.querySelector(`:scope > div.${EXT_SIDEBAR_MOUNT_CLASS}[${EXT_SIDEBAR_MOUNT_ATTR}="1"]`)
+        || doc.querySelector(`div.${EXT_SIDEBAR_MOUNT_CLASS}[${EXT_SIDEBAR_MOUNT_ATTR}="1"]`);
+      if (!mountNode) {
+        mountNode = doc.createElement('div');
+        mountNode.className = EXT_SIDEBAR_MOUNT_CLASS;
+        mountNode.setAttribute(EXT_SIDEBAR_MOUNT_ATTR, '1');
+        if (mountNode.style) mountNode.style.order = '99998';
+      }
+      if (mountNode.parentElement !== treeContainer) {
+        treeContainer.appendChild(mountNode);
+      }
+      return mountNode;
+    }
+
+    /**
+     * 私人仓库侧边栏扩展运行器：与工作台共享同一编译契约，同时向扩展注入
+     * selectStageItem / clearStage / activeStageItem，使侧边栏分组树与主舞台共享同一份 Hook 状态。
+     */
+    function PrivateSidebarExtensionRunner({ ext, active, activeStageItem, onSelectStage, onClearStage, parentSeq, runtimesRef, onExtUpdate, mountNode, stageTarget, showExtStage }) {
+      const cacheRef = useRef({ script: null, compiled: null });
+      if (cacheRef.current.script !== ext?.clientScript) {
+        cacheRef.current = {
+          script: ext?.clientScript,
+          compiled: compilePrivateExtension(ext?.clientScript),
+        };
+      }
+      const compiled = cacheRef.current.compiled;
+      const callExt = useCallback(
+        (subAction, payload = {}) => callApi('extAction', { extId: ext.id, subAction, payload }),
+        [ext.id]
+      );
+      const selectStageItem = useCallback(
+        (itemId = '') => onSelectStage(ext.id, itemId),
+        [ext.id, onSelectStage]
+      );
+      const runtime = compiled
+        ? compiled.useExtension({
+            id: ext.id,
+            title: ext.title,
+            iconSvg: ext.iconSvg || '',
+            active,
+            activeStageItem,
+            selectStageItem,
+            clearStage: onClearStage,
+            callExt,
+          })
+        : null;
+      runtimesRef.current[ext.id] = runtime;
+      useEffect(() => () => { delete runtimesRef.current[ext.id]; }, [ext.id, runtimesRef]);
+
+      // 侧边栏节点：直接在 Runner 渲染并通过 Portal 挂载到侧边栏宿主，保证内部状态同步更新
+      const sidebarPortal = mountNode && typeof ReactDOM?.createPortal === 'function' && typeof runtime?.renderSidebar === 'function'
+        ? ReactDOM.createPortal(h(React.Fragment, { key: `sb-ext-${ext.id}` }, runtime.renderSidebar()), mountNode)
+        : null;
+
+      // 主舞台节点：当前扩展处于激活且允许展示时，直接在 Runner 同步渲染并通过 Portal 挂载到舞台宿主，彻底消除 useEffect 跨组件异步延迟导致输入法候选框被重置
+      const stagePortal = active && showExtStage && stageTarget && typeof ReactDOM?.createPortal === 'function'
+        ? ReactDOM.createPortal(
+            h(
+              'div',
+              { key: `ext-stage-${ext.id}`, className: 'dsh-au-ext-stage-container', style: { width: '100%', height: '100%', overflow: 'hidden' } },
+              typeof runtime?.renderStage === 'function'
+                ? runtime.renderStage({
+                    itemId: activeStageItem || '',
+                    selectStageItem,
+                    clearStage: onClearStage,
+                  })
+                : (typeof runtime?.renderCenter === 'function' ? runtime.renderCenter() : null)
+            ),
+            stageTarget
+          )
+        : null;
+
+      return h(React.Fragment, null, sidebarPortal, stagePortal);
+    }
+
+    function PrivateSidebarExtensionsHost({ extensions, activeExtStage, showExtStage, stageHost, onSelectStage, onClearStage, onStageUpdate, runtimesRef }) {
+      const [mountNode, setMountNode] = useState(() => ensureSidebarExtensionsMountNode());
+      const parentSeqRef = useRef(0);
+      parentSeqRef.current += 1;
+      const [, setLocalTick] = useState(0);
+      const handleExtUpdate = useCallback(() => {
+        setLocalTick((t) => t + 1);
+        onStageUpdate();
+      }, [onStageUpdate]);
+
+      useEffect(() => {
+        const syncMount = () => {
+          const node = ensureSidebarExtensionsMountNode();
+          setMountNode((prev) => {
+            if (prev !== node && node && typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
+              window.dispatchEvent(new CustomEvent('dsh-au:sidebar-ext-mounted'));
+            }
+            return prev === node ? prev : node;
+          });
+          if (node && typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
+            window.dispatchEvent(new CustomEvent('dsh-au:sidebar-ext-mounted'));
+          }
+        };
+        syncMount();
+        const observer = typeof MutationObserver !== 'undefined' && typeof document !== 'undefined' && document.body
+          ? new MutationObserver(syncMount)
+          : null;
+        observer?.observe(document.body, { childList: true, subtree: true });
+        const timer = typeof window !== 'undefined' && typeof window.setInterval === 'function'
+          ? window.setInterval(syncMount, 1500)
+          : null;
+        return () => {
+          observer?.disconnect();
+          if (timer && typeof window !== 'undefined' && typeof window.clearInterval === 'function') {
+            window.clearInterval(timer);
+          }
+          if (typeof document !== 'undefined') {
+            const old = document.querySelector(`div.${EXT_SIDEBAR_MOUNT_CLASS}[${EXT_SIDEBAR_MOUNT_ATTR}="1"]`);
+            old?.remove?.();
+          }
+        };
+      }, []);
+
+      // 优先挂载到 AuFleetShell 主舞台内部预留的 slot 容器，降级回退到 .dsh-au-stage 或 stageHost
+      const stageTarget = stageHost ? (stageHost.querySelector('#dsh-au-ext-stage-slot') || stageHost.querySelector('.dsh-au-stage') || stageHost) : null;
+
+      return h(
+        React.Fragment,
+        null,
+        extensions.map((ext) => ext.styleText ? h('style', { key: `sb-ext-style-${ext.id}` }, ext.styleText) : null),
+        extensions.map((ext) => h(PrivateSidebarExtensionRunner, {
+          key: `sb-ext-runner-${ext.id}`,
+          ext,
+          active: activeExtStage?.extId === ext.id,
+          activeStageItem: activeExtStage?.extId === ext.id ? (activeExtStage.itemId || '') : '',
+          onSelectStage,
+          onClearStage,
+          parentSeq: parentSeqRef.current,
+          runtimesRef,
+          onExtUpdate: handleExtUpdate,
+          mountNode,
+          stageTarget,
+          showExtStage,
+        }))
+      );
+    }
+
     /**
      * 常驻壳层：设备栏插入中心列顶部，远程 iframe 插入 shell.overlay。
      * 两处都是 root 作用域，因此切换本机对话与其它主面板时不会卸载 iframe。
@@ -7514,6 +7677,11 @@ window.__ModuleLoader__.load({
       // 远端工作区计划按最近活动顺序刷新；revision 只用于让事件驱动的队列重新评估。
       const [preloadPlanRevision, setPreloadPlanRevision] = useState(0);
       const [preloadingSessionsByDevice, setPreloadingSessionsByDevice] = useState({});
+      const [sidebarExtensions, setSidebarExtensions] = useState([]);
+      const [activeExtStage, setActiveExtStage] = useState(null);
+      const sidebarExtRuntimesRef = useRef({});
+      const [, setSidebarExtTick] = useState(0);
+      const triggerSidebarExtRender = useCallback(() => setSidebarExtTick((n) => n + 1), []);
       useEffect(() => {
         if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return undefined;
         const onMessage = (event) => {
@@ -7568,6 +7736,10 @@ window.__ModuleLoader__.load({
         if (!snap || !snap.ok) return snap;
         // 顺手把顶栏轮询到的本机绑定、插件、收藏等同步进工作台缓存，避免首次开窗白屏。
         seedWorkbenchSnapshotFromState(snap);
+        if (Array.isArray(snap.privateExtensions)) {
+          const sbExts = snap.privateExtensions.filter((ext) => Array.isArray(ext?.surfaces) && ext.surfaces.includes('sidebar'));
+          setSidebarExtensions((prev) => (prev.length === 0 && sbExts.length === 0 ? prev : sbExts));
+        }
         const nextDeviceIds = new Set((snap.devices || []).map((device) => device.id));
         setState({ self: snap.self, devices: snap.devices || [], lanPeers: snap.lanPeers || [], remotes: snap.remotes || [] });
         // 默认留在本机；若手动设备被删除才回到本机对话。
@@ -7723,21 +7895,24 @@ window.__ModuleLoader__.load({
           selectPanel(null);
           return;
         }
-        if (activePanelId && activeId) {
+        if (activePanelId && (activeId || activeExtStage)) {
           clearStageTransition();
           setActiveId(null);
+          setActiveExtStage(null);
         }
-      }, [activePanelId, activeId, clearStageTransition, selectPanel]);
+      }, [activePanelId, activeId, activeExtStage, clearStageTransition, selectPanel]);
 
-      // 确保当前选中的设备标签始终加入保活挂载集合，并在 html 根节点标记远端舞台激活态供本机移动端插件隐藏悬浮按钮。
+      // 确保当前选中的设备标签始终加入保活挂载集合，并在 html 根节点标记远端/扩展舞台激活态供本机移动端插件隐藏悬浮按钮。
       useEffect(() => {
-        if (!activeId) {
+        if (!activeId && !activeExtStage) {
           if (typeof document !== 'undefined' && document.documentElement) {
             document.documentElement.removeAttribute('data-dsh-au-remote-active');
           }
           return undefined;
         }
-        setOpenedIds((old) => (old.includes(activeId) ? old : [...old, activeId]));
+        if (activeId) {
+          setOpenedIds((old) => (old.includes(activeId) ? old : [...old, activeId]));
+        }
         if (typeof document !== 'undefined' && document.documentElement) {
           document.documentElement.setAttribute('data-dsh-au-remote-active', 'true');
         }
@@ -7746,7 +7921,13 @@ window.__ModuleLoader__.load({
             document.documentElement.removeAttribute('data-dsh-au-remote-active');
           }
         };
-      }, [activeId]);
+      }, [activeId, activeExtStage]);
+
+      useEffect(() => {
+        if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
+          window.dispatchEvent(new CustomEvent('dsh-au:active-ext-stage-change', { detail: { activeExtStage } }));
+        }
+      }, [activeExtStage]);
 
       useEffect(() => {
         // 首次挂载也带上当前 inset，避免后续轮询初始化把 macOS 避让宽度冲掉。
@@ -7853,7 +8034,9 @@ window.__ModuleLoader__.load({
       const activeUnavailable = Boolean(activeDev && !loadedMap[activeFrameKey] && (activeDev.status === 'offline' || failedLoadDevices[activeDev.id]));
       const activeLoading = Boolean(activeDev && !activeNeedsCredentials && !activeUnavailable && !loadedMap[activeFrameKey]);
       const lanOn = state.self?.lanShareEnabled !== false;
-      const showStage = activeDev !== null && stageRect !== null && (!activePanelId || activePanelId === PANEL_ID);
+      const activeExtRuntime = activeExtStage ? sidebarExtRuntimesRef.current[activeExtStage.extId] : null;
+      const showExtStage = activeExtStage !== null && activeDev === null && stageRect !== null && (!activePanelId || activePanelId === PANEL_ID);
+      const showStage = (activeDev !== null || activeExtStage !== null) && stageRect !== null && (!activePanelId || activePanelId === PANEL_ID);
       useEffect(() => {
         if (!hosts || !state.self || (activeId && !activeDev)) return;
         const frame = activeId
@@ -8080,21 +8263,31 @@ window.__ModuleLoader__.load({
           sessionId,
           knownRemote,
           recordCount,
-          fromDeviceId: activeId || '',
+          fromDeviceId: activeId || (activeExtStage ? `ext:${activeExtStage.extId}` : ''),
         });
         clearStageTransition();
         setActiveId(null);
+        setActiveExtStage(null);
         if (!preserveTopbar) setTopbarCollapsed(false);
         // 返回本机对话时恢复本机导航；仅在收起状态调用，避免误反向折叠。
         expandSidebar();
         if (!preservePanel) selectPanel(null);
-      }, [activeId, clearStageTransition, expandSidebar, selectPanel]);
+      }, [activeExtStage, activeId, clearStageTransition, expandSidebar, selectPanel]);
+      const selectExtStage = useCallback((extId, itemId = '') => {
+        if (!extId) return;
+        clearStageTransition();
+        setActiveId(null);
+        setActiveExtStage({ extId: String(extId), itemId: String(itemId || '') });
+        if (compactMobile) collapseSidebar();
+        selectPanel(null);
+      }, [clearStageTransition, collapseSidebar, compactMobile, selectPanel]);
       const selectDevice = useCallback((id, { preserveTopbar = false, targetUrl = '', navigateTopLevel = false } = {}) => {
         const selectedDevice = devices.find((device) => device.id === id);
         if (!selectedDevice?.selectedRoute) return;
 
         const selectedRoute = selectedDevice.selectedRoute;
         if (!selectedRoute.id) return;
+        setActiveExtStage(null);
         // 切换已打开页面只显示/隐藏，不用最新优选覆盖实际打开路线或失败尝试。
         // Manual selection wins over the age-based preload plan; keep the visited iframe alive.
          pendingPreloadIdsRef.current = pendingPreloadIdsRef.current.filter((deviceId) => deviceId !== id);
@@ -8327,6 +8520,8 @@ window.__ModuleLoader__.load({
           setPreloadPlanRevision((revision) => revision + 1);
         };
         const onKeyDown = (event) => {
+          // 输入法组词阶段（isComposing / keyCode 229）绝不拦截按键
+          if (event.isComposing || event.keyCode === 229) return;
           const direction = getDeviceSwitchShortcutDirection(event);
           if (event.defaultPrevented || direction === null) return;
           if (event.target instanceof Element && event.target.closest('.dsh-au-mask')) return;
@@ -8411,6 +8606,8 @@ window.__ModuleLoader__.load({
           else if (tab === 'services') setWorkbenchTab((prev) => (prev === 'services' ? null : 'services'));
         };
         const onKey = (event) => {
+          // 输入法组词阶段（isComposing / keyCode 229）绝不拦截按键
+          if (event.isComposing || event.keyCode === 229) return;
           if (event.defaultPrevented) return;
           const actionId = findShortcutAction(event);
           if (actionId === 'menu.open') {
@@ -8546,7 +8743,7 @@ window.__ModuleLoader__.load({
                 { key: 'tabs', className: 'dsh-au-tabs' },
                 h(
                   'button',
-                  { type: 'button', className: `dsh-au-tab ${activeId === null ? 'active' : ''}`, onClick: () => selectLocal({ reason: 'topbar-click' }), title: accessAlias ? `当前通过远程域名访问：${accessAlias}` : '返回本机对话' },
+                  { type: 'button', className: `dsh-au-tab ${activeId === null && !activeExtStage ? 'active' : ''}`, onClick: () => selectLocal({ reason: 'topbar-click' }), title: accessAlias ? `当前通过远程域名访问：${accessAlias}` : '返回本机对话' },
                   h('span', { className: `dsh-au-dot ${state.self?.statusV2 || state.self?.status || 'idle'}` }),
                   h('span', { className: 'dsh-au-tab-name' }, localLabel),
                   h('span', { className: 'dsh-au-badge' }, localBadge)
@@ -8679,6 +8876,12 @@ window.__ModuleLoader__.load({
               )
             )
           : null,
+        // 预留主舞台扩展挂载插槽（保留 AuFleetShell 的 div.dsh-au-stage 作为外层容器）
+        h('div', {
+          key: 'dsh-au-ext-stage-slot',
+          id: 'dsh-au-ext-stage-slot',
+          style: { width: '100%', height: '100%', overflow: 'hidden', display: showExtStage ? 'block' : 'none' },
+        }),
         devices
           // 已打开的页面只因设备删除或显式刷新移除，短暂 offline/needs_auth 不破坏保活。
           .filter((device) => openedIds.includes(device.id) && (openedRouteUrls[device.id] || directFrameRoutes[device.id]))
@@ -8704,8 +8907,20 @@ window.__ModuleLoader__.load({
         React.Fragment,
         null,
         remoteManagementEnabled && hosts && !topbarCollapsed ? ReactDOM.createPortal(topbar, hosts.topHost) : null,
-        remoteManagementEnabled && hosts ? ReactDOM.createPortal(stage, hosts.stageHost) : null,
+        (remoteManagementEnabled || activeExtStage !== null) && hosts ? ReactDOM.createPortal(stage, hosts.stageHost) : null,
         remoteManagementEnabled && topbarCollapsed ? ReactDOM.createPortal(floatingCapsule, hosts?.stageHost || document.body) : null,
+        sidebarExtensions.length > 0
+          ? h(PrivateSidebarExtensionsHost, {
+              extensions: sidebarExtensions,
+              activeExtStage,
+              showExtStage,
+              stageHost: hosts?.stageHost || null,
+              onSelectStage: selectExtStage,
+              onClearStage: () => selectLocal({ reason: 'ext-clear-stage' }),
+              onStageUpdate: triggerSidebarExtRender,
+              runtimesRef: sidebarExtRuntimesRef,
+            })
+          : null,
         editingDevice ? ReactDOM.createPortal(h(DeviceModal, { initial: editingDevice, onClose: () => setEditingDevice(null), onSave: handleSaveDevice }), document.body) : null,
         editingRemote ? ReactDOM.createPortal(h(RouteModal, { initial: editingRemote, devices: allDevices, onClose: () => setEditingRemote(null), onSave: handleSaveRoute, onDelete: handleDeleteRoute }), document.body) : null,
         remoteManager ? ReactDOM.createPortal(h(RemoteManagerModal, {
@@ -14055,6 +14270,7 @@ window.__ModuleLoader__.load({
         selectedSessionByDevice: new Map(), // deviceId -> sessionId
         selectedWorkspaceByDevice: new Map(), // deviceId -> workspaceKey
         activeDeviceId: null,
+        activeExtStage: null, // { extId, itemId } | null
         devices: [],
          localDeviceId: '',
         hiddenKeys: new Set(),
@@ -15199,6 +15415,7 @@ window.__ModuleLoader__.load({
         if (activeAttr !== 'true') return false;
         if (!target.closest('[class*="_sidebarCol"], [class*="_regionArea"], [class*="_settingsArea"], [data-sidebar-header-controls], aside[data-slot="sidebar"]')) return false;
         if (target.closest(`[${MOUNT_ATTR}="1"]`)) return false;
+        if (target.closest('[data-dsh-au-ext-sidebar="1"]')) return false;
         if (target.closest(`[data-row-key^="workspace:${NATIVE_REMOTE_WS_PREFIX}"]`)) return false;
         const wsRow = target.closest('[data-row-key^="workspace:"]');
         if (wsRow && typeof wsRow.getAttribute === 'function') {
@@ -16550,7 +16767,10 @@ window.__ModuleLoader__.load({
           }
         }
 
-        if (!hasRemote) {
+        const extMountNode = treeContainer.querySelector?.(':scope > [data-dsh-au-ext-sidebar="1"]');
+        if (extMountNode?.style) extMountNode.style.order = '99998';
+
+        if (!hasRemote && !extMountNode) {
           clearDeviceGroups();
           return;
         }
@@ -17138,9 +17358,10 @@ window.__ModuleLoader__.load({
         let cachedSessSnap = null;
         sessList.getSnapshot = () => {
           const rawSess = origGetSessSnapshot() || { byId: {} };
-          const isRemoteActive = Boolean(store.activeDeviceId && store.activeDeviceId !== 'local');
+          const isRemoteActive = Boolean((store.activeDeviceId && store.activeDeviceId !== 'local') || store.activeExtStage);
           const selectedSig = [...store.selectedSessionByDevice.entries()].map(([k, v]) => `${k}:${v}`).join('|');
-          const cacheKey = `${store.revision}::${store.activeDeviceId || 'local'}::${selectedSig}`;
+          const extStageSig = store.activeExtStage ? `${store.activeExtStage.extId}:${store.activeExtStage.itemId}` : '';
+          const cacheKey = `${store.revision}::${store.activeDeviceId || 'local'}::${extStageSig}::${selectedSig}`;
           if (cachedSessSnap && cachedSessKey === cacheKey && cachedSessSnap.__rawSess === rawSess) {
             return cachedSessSnap.value;
           }
@@ -17362,10 +17583,13 @@ window.__ModuleLoader__.load({
 
         // trigger 记录被拦截的原生动作；sessionId/recordCount 用于判断是否因远端列表暂未识别该会话而误切回本机。
         const switchBackToLocalIfNeeded = (trigger = '', sessionId = '') => {
-          if (store.activeDeviceId && store.activeDeviceId !== 'local') {
-            cancelRemoteNavigation(store.activeDeviceId);
+          if ((store.activeDeviceId && store.activeDeviceId !== 'local') || store.activeExtStage) {
+            if (store.activeDeviceId && store.activeDeviceId !== 'local') {
+              cancelRemoteNavigation(store.activeDeviceId);
+            }
             store.createSessionSeq = (Number(store.createSessionSeq) || 0) + 1;
             store.activeDeviceId = null;
+            store.activeExtStage = null;
             pruneActiveInteractedSessions('');
             notifyStoreListeners();
             if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
@@ -18585,7 +18809,18 @@ window.__ModuleLoader__.load({
               applyServerTodoStateData(data);
             }
           };
+          const onActiveExtStageChange = (event) => {
+            store.activeExtStage = event?.detail?.activeExtStage || null;
+            notifyStoreListeners();
+          };
+          const onSidebarExtMounted = () => {
+            if (typeof document !== 'undefined') {
+              decorateSidebarDeviceGroups(document);
+            }
+          };
           window.addEventListener('dsh-au:active-device-change', onActiveDeviceChange);
+          window.addEventListener('dsh-au:active-ext-stage-change', onActiveExtStageChange);
+          window.addEventListener('dsh-au:sidebar-ext-mounted', onSidebarExtMounted);
           window.addEventListener('dsh-au:refresh-state', fetchServerRemoteWorkspaces);
           window.addEventListener('dsh-au:self-state', onSelfState);
           window.addEventListener('dsh-au:todo-state-data', onTodoStateData);
@@ -18634,6 +18869,8 @@ window.__ModuleLoader__.load({
             observer?.disconnect();
             window.clearInterval(pollTimer);
             window.removeEventListener('dsh-au:active-device-change', onActiveDeviceChange);
+            window.removeEventListener('dsh-au:active-ext-stage-change', onActiveExtStageChange);
+            window.removeEventListener('dsh-au:sidebar-ext-mounted', onSidebarExtMounted);
             window.removeEventListener('dsh-au:refresh-state', fetchServerRemoteWorkspaces);
             window.removeEventListener('dsh-au:self-state', onSelfState);
             window.removeEventListener('dsh-au:todo-state-data', onTodoStateData);
