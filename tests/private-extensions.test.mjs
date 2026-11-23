@@ -10,6 +10,14 @@ import {
   normalizeExtensionSurfaces,
   runPrivateExtensionsDoctor,
 } from '../lib/private-extensions.js';
+import {
+  isBridgedExtSessionId,
+  toBridgedDshSessionId,
+  groupEntriesIntoTurns,
+  buildDshSeedEvents,
+  syncExtSessionToNativeDsh,
+  installExtNativeSessionBridge,
+} from '../lib/ext-native-session-bridge.js';
 
 test('未配置或不存在 syncRepoRoot 时返回空扩展列表（出厂隔离）', () => {
   const missingRoot = join(tmpdir(), `dsh-au-no-ext-${Date.now()}`);
@@ -182,3 +190,82 @@ test('client/src 使用的 React Hook 必须在 01-runtime.js 顶部统一解构
   }
 });
 
+
+test('外部会话原生转接层将 Claude / GrokBot 历史投影为 DSH v4 事件流并拦截 LlmAdapter 续聊', async () => {
+  assert.equal(typeof installExtNativeSessionBridge, 'function');
+
+  const bridgedId = toBridgedDshSessionId('claude-workspace', 'sess-1');
+  assert.ok(bridgedId.startsWith('0000e870-'));
+  assert.equal(isBridgedExtSessionId(bridgedId), true);
+  assert.equal(isBridgedExtSessionId('regular-session-id'), false);
+
+  const entries = [
+    { role: 'user', content: '用户提问内容', timestampMs: 1000 },
+    { role: 'assistant', content: '助手回复内容', timestampMs: 2000 },
+  ];
+  const turns = groupEntriesIntoTurns(entries, 'claude-workspace');
+  assert.equal(turns.length, 1);
+  assert.equal(turns[0].userText, '用户提问内容');
+  assert.equal(turns[0].assistantText, '助手回复内容');
+
+  const events = buildDshSeedEvents({
+    dshSessionId: bridgedId,
+    extId: 'claude-workspace',
+    itemId: 'sess-1',
+    title: 'Claude 工作区会话',
+    turns,
+    startSeq: 0,
+    startTurn: 1,
+  });
+
+  assert.ok(events.length > 0);
+  assert.equal(events[0].seq, 0);
+  for (let i = 0; i < events.length; i += 1) {
+    assert.equal(events[i].seq, i);
+  }
+
+  const eventTypes = events.map((e) => e.type);
+  const requiredTypes = [
+    'model/selection',
+    'session/title',
+    'turn/start',
+    'step/start',
+    'system/message',
+    'user/message',
+    'assistant/message',
+    'step/end',
+    'turn/end',
+  ];
+  for (const expectedType of requiredTypes) {
+    assert.ok(eventTypes.includes(expectedType), '缺少预期事件类型: ' + expectedType);
+  }
+
+  const createdEvents = [];
+  let createdHeader = null;
+  const mockCtx = {
+    sessionPersistence: {
+      create: async (header) => {
+        createdHeader = header;
+        return {
+          append: async (events) => {
+            createdEvents.push(...events);
+            return true;
+          },
+        };
+      },
+    },
+  };
+
+  const syncRes = await syncExtSessionToNativeDsh(mockCtx, {
+    extId: 'claude-workspace',
+    itemId: 'sess-1',
+    title: 'Claude 工作区会话',
+    entries,
+  });
+
+  assert.equal(syncRes.ok, true);
+  assert.equal(syncRes.dshSessionId, bridgedId);
+  assert.equal(syncRes.persisted, true);
+  assert.equal(createdEvents.length, events.length);
+  assert.equal(createdHeader?.id, bridgedId);
+});

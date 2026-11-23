@@ -102,11 +102,29 @@
       return mountNode;
     }
 
+    function scrollNativeConversationToBottom(doc = typeof document !== 'undefined' ? document : null) {
+      if (!doc?.querySelectorAll) return;
+      const run = () => {
+        const scrollers = doc.querySelectorAll('[data-conversation-scroll], [data-conversation-scroll] [class*="_scroll"], [class*="_scrollBody"]');
+        for (const el of scrollers) {
+          if (el && typeof el.scrollHeight === 'number' && el.scrollHeight > 0) {
+            el.scrollTop = el.scrollHeight;
+          }
+        }
+      };
+      run();
+      if (typeof setTimeout === 'function') {
+        setTimeout(run, 80);
+        setTimeout(run, 260);
+      }
+    }
+
     /**
      * 私人仓库侧边栏扩展运行器：与工作台共享同一编译契约，同时向扩展注入
-     * selectStageItem / clearStage / activeStageItem，使侧边栏分组树与主舞台共享同一份 Hook 状态。
+     * selectStageItem / openNativeSession / clearStage / activeStageItem / activeNativeSession，
+     * 使侧边栏分组树既支持直接调起 DSH 100% 原生对话页，也保留扩展独立舞台兜底。
      */
-    function PrivateSidebarExtensionRunner({ ext, active, activeStageItem, onSelectStage, onClearStage, parentSeq, runtimesRef, onExtUpdate, mountNode, stageTarget, showExtStage }) {
+    function PrivateSidebarExtensionRunner({ ext, active, activeStageItem, activeNativeSession, onSelectStage, onOpenNativeSession, onClearStage, parentSeq, runtimesRef, onExtUpdate, mountNode, stageTarget, showExtStage }) {
       const cacheRef = useRef({ script: null, compiled: null });
       if (cacheRef.current.script !== ext?.clientScript) {
         cacheRef.current = {
@@ -123,6 +141,14 @@
         (itemId = '') => onSelectStage(ext.id, itemId),
         [ext.id, onSelectStage]
       );
+      const openNativeSession = useCallback(
+        (itemId = '', meta = {}) => (
+          typeof onOpenNativeSession === 'function'
+            ? onOpenNativeSession(ext.id, itemId, meta)
+            : onSelectStage(ext.id, itemId)
+        ),
+        [ext.id, onOpenNativeSession, onSelectStage]
+      );
       const runtime = compiled
         ? compiled.useExtension({
             id: ext.id,
@@ -130,7 +156,9 @@
             iconSvg: ext.iconSvg || '',
             active,
             activeStageItem,
+            activeNativeSession,
             selectStageItem,
+            openNativeSession,
             clearStage: onClearStage,
             callExt,
           })
@@ -164,7 +192,7 @@
       return h(React.Fragment, null, sidebarPortal, stagePortal);
     }
 
-    function PrivateSidebarExtensionsHost({ extensions, activeExtStage, showExtStage, stageHost, onSelectStage, onClearStage, onStageUpdate, runtimesRef }) {
+    function PrivateSidebarExtensionsHost({ extensions, activeExtStage, activeNativeSession, showExtStage, stageHost, onSelectStage, onOpenNativeSession, onClearStage, onStageUpdate, runtimesRef }) {
       const [mountNode, setMountNode] = useState(() => ensureSidebarExtensionsMountNode());
       const parentSeqRef = useRef(0);
       parentSeqRef.current += 1;
@@ -219,7 +247,9 @@
           ext,
           active: activeExtStage?.extId === ext.id,
           activeStageItem: activeExtStage?.extId === ext.id ? (activeExtStage.itemId || '') : '',
+          activeNativeSession,
           onSelectStage,
+          onOpenNativeSession,
           onClearStage,
           parentSeq: parentSeqRef.current,
           runtimesRef,
@@ -235,7 +265,7 @@
      * 常驻壳层：设备栏插入中心列顶部，远程 iframe 插入 shell.overlay。
      * 两处都是 root 作用域，因此切换本机对话与其它主面板时不会卸载 iframe。
      */
-    function AuFleetShell({ selectPanel, collapseSidebar, expandSidebar, toggleSidebar, usePanelInfo, openLocalSession, readLocalSessionId }) {
+    function AuFleetShell({ selectPanel, collapseSidebar, expandSidebar, toggleSidebar, usePanelInfo, openLocalSession, openBridgedLocalSession, readLocalSessionId }) {
       const doToggleSidebar = useCallback(() => {
         if (typeof toggleSidebar === 'function') {
           toggleSidebar();
@@ -269,8 +299,8 @@
       const openedReasonsRef = useRef(new Map());
       const advanceFailedRouteRef = useRef(null);
       const initialFocusControllerRef = useRef(null);
-      const initialFocusCallbacksRef = useRef({ openLocalSession, readLocalSessionId });
-      initialFocusCallbacksRef.current = { openLocalSession, readLocalSessionId };
+      const initialFocusCallbacksRef = useRef({ openLocalSession, openBridgedLocalSession, readLocalSessionId });
+      initialFocusCallbacksRef.current = { openLocalSession, openBridgedLocalSession, readLocalSessionId };
       useEffect(() => {
         const controller = createInitialSessionFocusController({
           openLocalSession: (id) => {
@@ -318,6 +348,7 @@
       const [preloadingSessionsByDevice, setPreloadingSessionsByDevice] = useState({});
       const [sidebarExtensions, setSidebarExtensions] = useState([]);
       const [activeExtStage, setActiveExtStage] = useState(null);
+      const [activeNativeSession, setActiveNativeSession] = useState(null);
       const sidebarExtRuntimesRef = useRef({});
       const [, setSidebarExtTick] = useState(0);
       const triggerSidebarExtRender = useCallback(() => setSidebarExtTick((n) => n + 1), []);
@@ -907,6 +938,7 @@
         clearStageTransition();
         setActiveId(null);
         setActiveExtStage(null);
+        if (reason !== 'ext-native-session') setActiveNativeSession(null);
         if (!preserveTopbar) setTopbarCollapsed(false);
         // 返回本机对话时恢复本机导航；仅在收起状态调用，避免误反向折叠。
         expandSidebar();
@@ -916,10 +948,59 @@
         if (!extId) return;
         clearStageTransition();
         setActiveId(null);
+        setActiveNativeSession(null);
         setActiveExtStage({ extId: String(extId), itemId: String(itemId || '') });
         if (compactMobile) collapseSidebar();
         selectPanel(null);
       }, [clearStageTransition, collapseSidebar, compactMobile, selectPanel]);
+      const openExtNativeSession = useCallback(async (extId, itemId = '', meta = {}) => {
+        if (!extId || !itemId) return { ok: false };
+        const openBridged = initialFocusCallbacksRef.current.openBridgedLocalSession;
+        const openLocal = typeof openBridged === 'function'
+          ? openBridged
+          : initialFocusCallbacksRef.current.openLocalSession;
+        if (typeof openLocal !== 'function') {
+          const msg = 'openLocalSession 未就绪';
+          console.warn('[dsh-au] openExtNativeSession skipped:', extId, itemId, msg);
+          reportClientEvent('ext-native-open-failed', extId, { itemId, error: msg });
+          selectExtStage(extId, itemId);
+          return { ok: false, fallback: 'stage', error: msg };
+        }
+        try {
+          const res = await callApi('openExtNativeSession', {
+            extId: String(extId),
+            itemId: String(itemId),
+            ...(meta && typeof meta === 'object' ? meta : {}),
+          });
+          if (res?.ok && res.dshSessionId) {
+            const opened = await openLocal(res.dshSessionId);
+            if (opened === false) {
+              throw new Error(`uiWorkspace.openSession 返回 false (session=${res.dshSessionId})`);
+            }
+            clearStageTransition();
+            setActiveId(null);
+            setActiveExtStage(null);
+            setActiveNativeSession({
+              extId: String(extId),
+              itemId: String(itemId),
+              dshSessionId: String(res.dshSessionId),
+            });
+            if (compactMobile) collapseSidebar();
+            selectPanel(null);
+            scrollNativeConversationToBottom();
+            return res;
+          }
+          const errMsg = res?.error || 'openExtNativeSession 未返回有效的 dshSessionId';
+          console.warn('[dsh-au] openExtNativeSession rejected:', extId, itemId, errMsg);
+          reportClientEvent('ext-native-open-failed', extId, { itemId, error: errMsg });
+        } catch (err) {
+          const errMsg = String(err?.message || err || '未知异常');
+          console.warn('[dsh-au] openExtNativeSession failed:', extId, itemId, errMsg);
+          reportClientEvent('ext-native-open-failed', extId, { itemId, error: errMsg });
+        }
+        selectExtStage(extId, itemId);
+        return { ok: false, fallback: 'stage' };
+      }, [clearStageTransition, collapseSidebar, compactMobile, selectExtStage, selectPanel]);
       const selectDevice = useCallback((id, { preserveTopbar = false, targetUrl = '', navigateTopLevel = false } = {}) => {
         const selectedDevice = devices.find((device) => device.id === id);
         if (!selectedDevice?.selectedRoute) return;
@@ -1552,9 +1633,11 @@
           ? h(PrivateSidebarExtensionsHost, {
               extensions: sidebarExtensions,
               activeExtStage,
+              activeNativeSession,
               showExtStage,
               stageHost: hosts?.stageHost || null,
               onSelectStage: selectExtStage,
+              onOpenNativeSession: openExtNativeSession,
               onClearStage: () => selectLocal({ reason: 'ext-clear-stage' }),
               onStageUpdate: triggerSidebarExtRender,
               runtimesRef: sidebarExtRuntimesRef,

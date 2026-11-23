@@ -3000,10 +3000,14 @@
           // 本地工作区会话排序：原始 workspace.json 中按创建顺序存储 sessionIds，
           // 这里按「置顶优先 -> 最新活跃时间倒序」重新排序，确保刚活跃的旧会话排在顶部
           const localItems = rawLocalItems.map((ws) => {
-            if (!Array.isArray(ws?.sessionIds) || ws.sessionIds.length <= 1) return ws;
+            if (!Array.isArray(ws?.sessionIds)) return ws;
+            const filteredIds = ws.sessionIds.filter((sid) => !/^0000e870-/i.test(String(sid || '')));
+            if (filteredIds.length <= 1) {
+              return filteredIds.length === ws.sessionIds.length ? ws : { ...ws, sessionIds: filteredIds };
+            }
             return {
               ...ws,
-              sessionIds: [...ws.sessionIds].sort((a, b) => (
+              sessionIds: [...filteredIds].sort((a, b) => (
                 Number(localPinnedSet.has(b)) - Number(localPinnedSet.has(a))
                 || getLocalSessionSortTs(b) - getLocalSessionSortTs(a)
               )),

@@ -189,6 +189,19 @@
                 workspace.openSession(sessionId);
                 return true;
               },
+              openBridgedLocalSession: async (sessionId) => {
+                const workspace = ctx.get?.('uiWorkspace') || ctx.uiWorkspace;
+                if (typeof workspace?.openSession !== 'function') {
+                  throw new Error('uiWorkspace.openSession 未就绪');
+                }
+                const sessions = ctx.get?.('sessions') || ctx.sessions;
+                const known = Boolean(sessions?.list?.getSnapshot?.()?.byId?.[sessionId]);
+                if (!known && typeof sessions?.refresh === 'function') {
+                  await sessions.refresh();
+                }
+                workspace.openSession(sessionId);
+                return true;
+              },
               readLocalSessionId: () => readNativeSelectedSessionId(ctx),
               // layout 仅公开 toggle 动作；以宿主稳定 data 属性避免将已折叠的栏误打开。
               collapseSidebar: () => {
