@@ -16,9 +16,12 @@ import {
   computeLocalOfficialSettingsHash,
   computeOfficialSettingsHash,
   decideStartupOfficialSyncAction,
+  getSelectableDshProfiles,
+  loadDshProfilesManifest,
   normalizeCloudSyncConfig,
   getAllCloudPluginIds,
   pushLocalOfficialSettingsToRepo,
+  resolveRepoProfilePatchPath,
   syncOfficialDesktopPreferences,
   syncOfficialDshAuPreferences,
 } from '../lib/official-settings-sync.js';
@@ -34,10 +37,10 @@ import { copyRestoreMock, useTempSyncRepo } from './helpers/temp-sync-repo.mjs';
 
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-test('normalizeCloudSyncConfig：默认关闭自动同步、默认全选 5 项官方设置，自定义勾选后保留合法项', () => {
+test('normalizeCloudSyncConfig：默认关闭自动同步、默认全选官方设置，自定义勾选后保留合法项且未知方案回退默认 general', () => {
   const def = normalizeCloudSyncConfig(undefined);
   assert.equal(def.enabled, false);
-  assert.equal(def.profile, 'kiro');
+  assert.equal(def.profile, 'general');
   assert.deepEqual(def.selectedItems, [...ALL_OFFICIAL_SYNC_ITEM_IDS]);
   assert.equal(def.customized, false);
   // 本机设置项默认全开，保持旧版「随 dsh-au 插件整体同步」的行为。
@@ -50,8 +53,8 @@ test('normalizeCloudSyncConfig：默认关闭自动同步、默认全选 5 项�
     selectedPreferences: ['shortcuts', 'invalid-pref', 'shortcuts'],
   });
   assert.equal(custom.enabled, true);
-  // 旧 generic 方案已下线，保存过的值自动落到「通用」(kiro)。
-  assert.equal(custom.profile, 'kiro');
+  // 非 selectable 或未知方案名自动回退到清单默认方案 (general)。
+  assert.equal(custom.profile, 'general');
   // ui-theme 已是独立同步项，不再被并入旧的 general-settings。
   assert.deepEqual(custom.selectedItems, ['ui-theme', 'desktop-preferences']);
   assert.deepEqual(custom.selectedPreferences, ['shortcuts']);
@@ -928,3 +931,85 @@ test('computeLocalOfficialSettingsHash 与 decideStartupOfficialSyncAction：双
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('loadDshProfilesManifest：支持私有仓自定义方案名、任意模板文件名与平台过滤，彻底解耦文件名硬编码', (t) => {
+  const tempRoot = mkdtempSync(path.join(tmpdir(), 'dsh-custom-profiles-'));
+  t.after(() => rmSync(tempRoot, { recursive: true, force: true }));
+
+  const repoRoot = path.join(tempRoot, 'repo');
+  const dshHome = path.join(tempRoot, 'dshHome');
+  const cloudDir = path.join(repoRoot, 'dsh-sync', 'cloud');
+  const customTplDir = path.join(repoRoot, 'templates');
+  const profileDir = path.join(dshHome, 'profiles', 'desktop');
+  mkdirSync(cloudDir, { recursive: true });
+  mkdirSync(customTplDir, { recursive: true });
+  mkdirSync(profileDir, { recursive: true });
+
+  // 自定义清单：不遵循 cordis.patch.<id>.yml 命名，且指定平台限制
+  writeFileSync(
+    path.join(cloudDir, 'dsh-profiles.json'),
+    JSON.stringify({
+      schemaVersion: 1,
+      defaultProfile: 'daily',
+      profiles: [
+        {
+          id: 'daily',
+          label: '日常通用',
+          file: 'templates/my-daily.yaml',
+          platforms: ['darwin', 'win32', 'linux'],
+          selectable: true,
+        },
+        {
+          id: 'office',
+          label: '公司专网',
+          file: 'templates/office-only.yaml',
+          platforms: ['darwin'],
+          selectable: true,
+        },
+        {
+          id: 'legacy-cli',
+          label: 'CLI保留',
+          file: 'templates/legacy.yaml',
+          platforms: ['darwin', 'win32'],
+          selectable: false,
+        },
+      ],
+    }, null, 2),
+  );
+
+  for (const file of ['my-daily.yaml', 'office-only.yaml', 'legacy.yaml']) {
+    writeFileSync(path.join(customTplDir, file), '- id: ui-theme\n  config:\n    fontSize: 14\n- id: llm-pi-ai\n  config:\n    model: old\n');
+  }
+  writeFileSync(path.join(profileDir, 'cordis.patch.yml'), '- id: ui-theme\n  config:\n    fontSize: 18\n- id: llm-pi-ai\n  config:\n    model: new-office\n');
+
+  const manifest = loadDshProfilesManifest(repoRoot);
+  assert.equal(manifest.defaultProfile, 'daily');
+  assert.equal(manifest.profiles.length, 3);
+  assert.equal(resolveRepoProfilePatchPath(repoRoot, 'office'), path.join(repoRoot, 'templates', 'office-only.yaml'));
+
+  const winSelectable = getSelectableDshProfiles({ repoRoot, platform: 'win32' });
+  assert.deepEqual(winSelectable.map((p) => p.id), ['daily']);
+  const macSelectable = getSelectableDshProfiles({ repoRoot, platform: 'darwin' });
+  assert.deepEqual(macSelectable.map((p) => p.id), ['daily', 'office']);
+
+  // 未知或非 selectable 方案名自动回退到 defaultProfile (daily)
+  assert.equal(normalizeCloudSyncConfig({ profile: 'kiro' }, { repoRoot }).profile, 'daily');
+  assert.equal(normalizeCloudSyncConfig({ profile: 'legacy-cli' }, { repoRoot }).profile, 'daily');
+  assert.equal(normalizeCloudSyncConfig({ profile: 'office' }, { repoRoot }).profile, 'office');
+
+  // 推送时通用项更新全部清单模板，模型项只更新选中的 office-only.yaml
+  pushLocalOfficialSettingsToRepo({
+    repoRoot,
+    dshHome,
+    profile: 'office',
+    selectedItems: ['ui-theme', 'llm-providers'],
+    selectedPlugins: [],
+    selectedPreferences: [],
+  });
+  assert.match(readFileSync(path.join(customTplDir, 'my-daily.yaml'), 'utf8'), /fontSize: 18/);
+  assert.match(readFileSync(path.join(customTplDir, 'my-daily.yaml'), 'utf8'), /model: old/);
+  assert.match(readFileSync(path.join(customTplDir, 'office-only.yaml'), 'utf8'), /fontSize: 18/);
+  assert.match(readFileSync(path.join(customTplDir, 'office-only.yaml'), 'utf8'), /model: new-office/);
+  assert.match(readFileSync(path.join(customTplDir, 'legacy.yaml'), 'utf8'), /fontSize: 18/);
+});
+

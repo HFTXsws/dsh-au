@@ -19,6 +19,7 @@ const {
   applySelectedOfficialPatchBlocks,
   computeOfficialSettingsHash,
   normalizeCloudSyncConfig,
+  resolveRepoProfilePatchPath,
   syncOfficialDesktopPreferences,
 } = await import(pathToFileURL(path.join(pluginRoot, 'lib', 'official-settings-sync.js')).href);
 
@@ -30,14 +31,14 @@ let localAuConfigRaw = null;
 try {
   if (existsSync(auConfigPath)) localAuConfigRaw = JSON.parse(readFileSync(auConfigPath, 'utf8'));
 } catch {}
-const localCloudSync = normalizeCloudSyncConfig(localAuConfigRaw?.cloudSync);
+const localCloudSync = normalizeCloudSyncConfig(localAuConfigRaw?.cloudSync, { repoRoot });
 if (autoSync && !localCloudSync.enabled) {
   console.log('[dsh-restore] 本机未开启云端配置自动同步，跳过。');
   process.exit(0);
 }
 
-const profile = localCloudSync.profile || 'generic';
-const source = path.join(repoRoot, 'app-config', 'dsh', `cordis.patch.${profile}.yml`);
+const profile = localCloudSync.profile || 'general';
+const source = resolveRepoProfilePatchPath(repoRoot, profile);
 const targetDir = path.join(dshHome, 'profiles', 'desktop');
 const target = path.join(targetDir, 'cordis.patch.yml');
 if (!existsSync(source) || !existsSync(targetDir)) {

@@ -947,13 +947,9 @@
       },
     ];
 
-    // 内部 ID 与私有仓库的 cordis.patch.<id>.yml 文件名保持不变，只换显示名。
-    // generic 已不再提供；「工作」含本机 OneAPI 链路，仅 macOS 可选。
-    const CLOUD_SYNC_PROFILE_OPTIONS = [
-      { id: 'kiro', label: '通用' },
-      ...(typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || '')
-        ? [{ id: 'local', label: '工作' }]
-        : []),
+    // 后端未下发动态方案列表时的默认兜底常量；实际方案全部由后端返回。
+    const DEFAULT_CLOUD_SYNC_PROFILE_OPTIONS = [
+      { id: 'general', label: '通用' },
     ];
 
     const PREFERENCE_JUMPS = {
@@ -968,28 +964,19 @@
       return node;
     }
 
-    function resolveItemComparisons(item, profile) {
+    // 根据后端返回的动态方案列表生成对比说明，不再硬编码旧方案分支
+    function resolveItemComparisons(item, profile, profileOptions = DEFAULT_CLOUD_SYNC_PROFILE_OPTIONS) {
       if (item.id === 'llm-providers') {
-        if (profile === 'generic') {
-          return [
-            { label: 'DSH 模型供应商列表 (llm-pi-ai)', defaultValue: '无自定义供应商', currentValue: '按 generic 方案从私人仓库同步供应商列表' },
-            { label: 'Codex 模型目录', defaultValue: '不自动刷新', currentValue: '同步完整与精简目录，不切换当前模型' },
-            { label: '原生 ACP 代理适配器', defaultValue: '未配置', currentValue: '不启用（纯网关模式）' },
-            { label: '新对话默认模型', defaultValue: '官方默认模型', currentValue: '保持通用网关默认模型' },
-          ];
+        const matchedProfile = (Array.isArray(profileOptions) ? profileOptions : []).find(o => o.id === profile);
+        if (Array.isArray(matchedProfile?.comparisons) && matchedProfile.comparisons.length > 0) {
+          return matchedProfile.comparisons;
         }
-        if (profile === 'local') {
-          return [
-            { label: 'DSH 模型供应商列表 (llm-pi-ai)', defaultValue: '无自定义供应商', currentValue: '按 local 方案从私人仓库同步供应商列表' },
-            { label: 'Codex 模型目录', defaultValue: '不自动刷新', currentValue: '同步完整与精简目录，不切换当前模型' },
-            { label: '新对话默认模型 (agent-default-model)', defaultValue: '官方默认模型', currentValue: '按 local 方案同步默认模型与思考强度' },
-          ];
-        }
+        const label = matchedProfile?.label || profile || '当前';
         return [
-          { label: 'DSH 模型供应商列表 (llm-pi-ai)', defaultValue: '无自定义供应商', currentValue: '按所选方案从私人仓库同步供应商列表' },
+          { label: 'DSH 模型供应商列表 (llm-pi-ai)', defaultValue: '无自定义供应商', currentValue: `按「${label}」方案从私人仓库同步供应商列表` },
           { label: 'Codex 模型目录', defaultValue: '不自动刷新', currentValue: '同步完整与精简目录，不切换当前模型' },
           { label: '原生 ACP 代理适配器', defaultValue: '未配置', currentValue: '按所选方案同步 ACP 适配器' },
-          { label: '新对话默认模型 (agent-default-model)', defaultValue: '官方默认模型', currentValue: '按所选方案同步默认模型与思考强度' },
+          { label: '新对话默认模型 (agent-default-model)', defaultValue: '官方默认模型', currentValue: `按「${label}」方案同步默认模型与思考强度` },
         ];
       }
       if (Array.isArray(item.comparisons) && item.comparisons.length > 0) return item.comparisons;
@@ -999,9 +986,9 @@
     }
 
     /** 官方设置「方案 H」：统一取出细项，旧服务端无 fields 时回退到静态对比表（local 为 null）。 */
-    function resolveOfficialFields(item, profile) {
+    function resolveOfficialFields(item, profile, profileOptions) {
       if (Array.isArray(item.fields) && item.fields.length > 0) return item.fields;
-      return resolveItemComparisons(item, profile).map(c => ({
+      return resolveItemComparisons(item, profile, profileOptions).map(c => ({
         label: c.label,
         officialDefault: c.defaultValue ?? null,
         local: null,
@@ -1030,11 +1017,13 @@
     }
 
     /** 官方设置单行：勾选框、名称与 ID、状态，点击行展开四列对照（官方默认 / 本机 / 云端）。 */
-    function renderOfficialRow({ item, checked, busy, expanded, profile, onToggleCheck, onToggleExpand, onChangeProfile }) {
-      const fields = resolveOfficialFields(item, profile);
+    function renderOfficialRow({ item, checked, busy, expanded, profile, profileOptions, onToggleCheck, onToggleExpand, onChangeProfile }) {
+      // 使用后端动态方案列表，缺省时回退到默认兜底常量
+      const options = Array.isArray(profileOptions) && profileOptions.length > 0 ? profileOptions : DEFAULT_CLOUD_SYNC_PROFILE_OPTIONS;
+      const fields = resolveOfficialFields(item, profile, options);
       const hasLocal = officialFieldsHaveLocal(fields);
       const inSync = item.inSync !== false;
-      const profileLabel = (CLOUD_SYNC_PROFILE_OPTIONS.find(o => o.id === profile) || {}).label || profile;
+      const profileLabel = (options.find(o => o.id === profile) || {}).label || profile;
       const idText = item.id === 'desktop-preferences'
         ? 'desktop-preferences.json'
         : ((Array.isArray(item.patchIds) && item.patchIds.length > 0 ? item.patchIds : [item.id]).join(' · '));
@@ -1163,7 +1152,7 @@
                         disabled: busy,
                         onChange: (e) => onChangeProfile(e.target.value),
                       },
-                      CLOUD_SYNC_PROFILE_OPTIONS.map(opt => h('option', { key: opt.id, value: opt.id }, opt.label))
+                      options.map(opt => h('option', { key: opt.id, value: opt.id }, opt.label || opt.id))
                     )
                   )
                 : null,
@@ -1221,9 +1210,16 @@
     }
 
     /** 云端同步独立弹窗：双 Tab（DSH 官方设置 | 云插件与配置）、勾选启用状态与配置、展开对比 */
-    function CloudSyncModal({ isOpen, onClose, cloudSync, items, itemsByProfile, pluginItems, preferenceItems, machineId, onSave, onSaveAndSync, onPushToRepo, onSyncSinglePlugin, busy, message }) {
+    function CloudSyncModal({ isOpen, onClose, cloudSync, profileOptions, items, itemsByProfile, pluginItems, preferenceItems, machineId, onSave, onSaveAndSync, onPushToRepo, onSyncSinglePlugin, busy, message }) {
+      // 消费后端返回的动态方案列表，若已保存方案不在可选列表中则自动归位到列表首项
+      const availableProfileOptions = Array.isArray(profileOptions) && profileOptions.length > 0
+        ? profileOptions
+        : DEFAULT_CLOUD_SYNC_PROFILE_OPTIONS;
+      const defaultProfileId = availableProfileOptions.some((o) => o.id === cloudSync.profile)
+        ? cloudSync.profile
+        : (availableProfileOptions[0]?.id || 'general');
       const [activeTab, setActiveTab] = useState('official');
-      const [profile, setProfile] = useState(cloudSync.profile || 'kiro');
+      const [profile, setProfile] = useState(defaultProfileId);
       const [preferenceMap, setPreferenceMap] = useState(() => {
         const initial = {};
         for (const id of (cloudSync.selectedPreferences || FALLBACK_PREFERENCE_ITEMS.map(i => i.id))) initial[id] = true;
@@ -1248,7 +1244,7 @@
 
       useEffect(() => {
         if (!isOpen) return;
-        setProfile(cloudSync.profile || 'kiro');
+        setProfile(defaultProfileId);
         const nextItems = {};
         for (const id of (cloudSync.selectedItems || [])) nextItems[id] = true;
         setSelectedMap(nextItems);
@@ -1261,7 +1257,7 @@
         const nextPreferences = {};
         for (const id of (cloudSync.selectedPreferences || FALLBACK_PREFERENCE_ITEMS.map(i => i.id))) nextPreferences[id] = true;
         setPreferenceMap(nextPreferences);
-      }, [isOpen, cloudSync.profile, cloudSync.selectedItems, cloudSync.selectedPlugins, cloudSync.syncPluginConfigs, cloudSync.selectedPreferences]);
+      }, [isOpen, defaultProfileId, cloudSync.selectedItems, cloudSync.selectedPlugins, cloudSync.syncPluginConfigs, cloudSync.selectedPreferences]);
 
       useEffect(() => {
         if (!isOpen) return;
@@ -1357,6 +1353,7 @@
         busy,
         expanded: Boolean(expandedMap[item.id]),
         profile,
+        profileOptions: availableProfileOptions,
         onToggleCheck: handleToggle,
         onToggleExpand: handleToggleExpand,
         onChangeProfile: setProfile,
@@ -1742,9 +1739,11 @@
 
     /** 云端配置自动同步区块 */
     function CloudSyncFeatureGroup() {
+      const [profileOptions, setProfileOptions] = useState(DEFAULT_CLOUD_SYNC_PROFILE_OPTIONS);
       const [cloudSync, setCloudSync] = useState({
         enabled: false,
-        profile: 'kiro',
+        // 默认取动态方案列表首项或 general，避免写死旧方案名
+        profile: DEFAULT_CLOUD_SYNC_PROFILE_OPTIONS[0]?.id || 'general',
         selectedItems: FALLBACK_CLOUD_SYNC_ITEMS.map(i => i.id),
         customized: false,
         selectedPlugins: FALLBACK_CLOUD_SYNC_PLUGINS.map(p => p.id),
@@ -1776,7 +1775,19 @@
 
       const applyCloudSyncResponse = (res) => {
         if (!res?.ok) return;
-        if (res.cloudSync) setCloudSync(prev => ({ ...prev, ...res.cloudSync, firstSyncPending: Boolean(res.cloudSync.firstSyncPending) }));
+        // 消费后端顶层返回的动态方案列表
+        if (Array.isArray(res.profileOptions) && res.profileOptions.length > 0) {
+          setProfileOptions(res.profileOptions);
+        }
+        if (res.cloudSync) {
+          const fallbackProfile = (Array.isArray(res.profileOptions) && res.profileOptions[0]?.id) || 'general';
+          setCloudSync(prev => ({
+            ...prev,
+            ...res.cloudSync,
+            profile: res.cloudSync.profile || prev.profile || fallbackProfile,
+            firstSyncPending: Boolean(res.cloudSync.firstSyncPending),
+          }));
+        }
         // 首次接入：有私有仓库、从没同步过、总开关已开 → 先确认，再立即拉取，不用等重启。
         if (res.cloudSync?.firstSyncPending && res.cloudSync.enabled && !firstSyncDismissedRef.current) {
           setFirstSyncConfirmOpen(true);
@@ -1980,8 +1991,9 @@
       };
 
       const titleId = 'dsh-au-feature-cloud-sync-title';
-      const allItems = (itemsByProfile && Array.isArray(itemsByProfile[cloudSync.profile]) && itemsByProfile[cloudSync.profile].length > 0)
-        ? itemsByProfile[cloudSync.profile]
+      const activeProfile = cloudSync.profile || (profileOptions[0]?.id || 'general');
+      const allItems = (itemsByProfile && Array.isArray(itemsByProfile[activeProfile]) && itemsByProfile[activeProfile].length > 0)
+        ? itemsByProfile[activeProfile]
         : (items && items.length > 0 ? items : FALLBACK_CLOUD_SYNC_ITEMS);
       const allPluginItems = Array.isArray(pluginItems) ? pluginItems : FALLBACK_CLOUD_SYNC_PLUGINS;
       const resolvedPreferenceItems = resolvePreferenceSyncItems(preferenceItems, shortcutOverrides, modelShortcutSnapshot);
@@ -2100,6 +2112,7 @@
           isOpen: modalOpen,
           onClose: () => setModalOpen(false),
           cloudSync,
+          profileOptions,
           items: allItems,
           itemsByProfile,
           pluginItems: allPluginItems,

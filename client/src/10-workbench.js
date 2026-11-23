@@ -94,7 +94,8 @@
          setPluginNotice(text);
        };
       const [menuParamValues, setMenuParamValues] = useState({});
-      const [dshProfile, setDshProfile] = useState('kiro');
+      // 默认方案改为 general，加载后端动态方案后再自动对齐
+      const [dshProfile, setDshProfile] = useState('general');
       const [scrcpyDevice, setScrcpyDevice] = useState('');
       const [stdinText, setStdinText] = useState('');
       const [busySvcId, setBusySvcId] = useState('');
@@ -629,13 +630,46 @@
         } finally { setPluginSaving(false); }
       };
 
+      // 优先消费后端返回的当前平台可用方案列表，缺失时从 #71 菜单参数或兜底项派生
+      const dshProfileOptions = (() => {
+        if (Array.isArray(wb?.dshProfiles) && wb.dshProfiles.length > 0) {
+          return wb.dshProfiles.map((p) => ({ id: p.id, label: p.label || p.id }));
+        }
+        const menu71 = (wb?.menuSpec?.groups || [])
+          .flatMap((g) => (Array.isArray(g?.items) ? g.items : []))
+          .find((it) => it?.code === '71');
+        const profileParam = (Array.isArray(menu71?.params) ? menu71.params : [])
+          .find((p) => p?.name === 'dshProfile');
+        const targetPlatform = isWin ? 'win32' : 'darwin';
+        const specOptions = (Array.isArray(profileParam?.options) ? profileParam.options : [])
+          .filter((opt) => !opt?.platform || opt.platform === targetPlatform)
+          .map((opt) => ({
+            id: opt.value || opt.id,
+            label: opt.label || opt.value || opt.id,
+          }))
+          .filter((opt) => Boolean(opt.id));
+        if (specOptions.length > 0) return specOptions;
+        return [{ id: 'general', label: '通用' }];
+      })();
+
+      const activeDshProfile = dshProfileOptions.some((opt) => opt.id === dshProfile)
+        ? dshProfile
+        : (dshProfileOptions[0]?.id || 'general');
+
+      // 后端动态方案加载后，若当前选中方案不在可用列表内则自动对齐到有效首项
+      useEffect(() => {
+        if (Array.isArray(wb?.dshProfiles) && wb.dshProfiles.length > 0 && activeDshProfile !== dshProfile) {
+          setDshProfile(activeDshProfile);
+        }
+      }, [wb?.dshProfiles, activeDshProfile, dshProfile]);
+
       /** 从云端插件清单生成只读差异预览：对照安装、启用与配置明细后再由用户确认还原到本地。 */
       const previewRestorePlugins = async (machineId = '') => {
         setPluginSaving(true);
         try {
           const res = await callApi('previewRestoreMachinePlugins', {
             machineId,
-            dshProfile: isWin ? 'kiro' : dshProfile,
+            dshProfile: activeDshProfile,
           });
           if (!res?.ok) throw new Error(res?.error || '生成还原预览失败');
           if (!res?.preview) throw new Error('服务端尚未载入还原预览接口，请重启 DSH 使后端新接口生效');
@@ -667,7 +701,7 @@
         try {
           const res = await callApi('restoreMachinePlugins', {
             machineId,
-            dshProfile: isWin ? 'kiro' : dshProfile,
+            dshProfile: activeDshProfile,
           });
           if (!res?.ok) throw pluginResultError(res, '一键还原插件到本地失败');
           if (!res?.machineId && !Array.isArray(res?.results)) throw new Error('服务端尚未载入插件还原接口，请重启 DSH 使后端新接口生效');
@@ -704,7 +738,7 @@
           const removing = currentMachinePluginIds.includes(pluginId);
           const res = await callApi(
             removing ? 'unlinkCloudPluginFromCurrentMachine' : 'syncCloudPluginToCurrentMachine',
-            removing ? { pluginId } : { pluginId, dshProfile: isWin ? 'kiro' : dshProfile },
+            removing ? { pluginId } : { pluginId, dshProfile: activeDshProfile },
           );
           if (!res?.ok) throw pluginResultError(res, '云插件选择保存失败');
           updatePluginState(res);
@@ -770,7 +804,7 @@
         persistPluginSyncing(true);
         setPluginSaving(true);
         try {
-          const res = await callApi('syncCloudPluginToCurrentMachine', { pluginId, dshProfile: isWin ? 'kiro' : dshProfile });
+          const res = await callApi('syncCloudPluginToCurrentMachine', { pluginId, dshProfile: activeDshProfile });
           if (!res?.ok) throw pluginResultError(res, '插件同步失败');
           updatePluginState(res);
           const skipped = res.outcome === 'skipped';
@@ -796,14 +830,6 @@
       const selectedMenu = selectedMenuFound.item;
       const selectedSvc = visibleServices.find((s) => s.id === selectedServiceId) || visibleServices[0] || null;
 
-      const dshProfileOptions = isWin
-        ? [{ id: 'kiro', label: 'kiro' }]
-        : [
-            { id: 'kiro', label: 'kiro' },
-            { id: 'local', label: 'local' },
-          ];
-
-
       // 列表里已接入与运行中的都会出现，标题里的「运行中」只数真正在跑的，避免把已停止也算成在跑。
       const runningCount = localServices.filter((s) => s.running).length;
 
@@ -811,7 +837,7 @@
       const scope = {
         wb, activeTab, selectedCode, setSelectedCode, selectedServiceId, setSelectedServiceId,
         setSelectedPluginId, setPluginView, setServiceView, serviceView, pluginSaving, pluginNotice, pluginNoticeOwner, menuParamValues,
-        setMenuParamValues, dshProfile, setDshProfile, scrcpyDevice,
+        setMenuParamValues, dshProfile: activeDshProfile, setDshProfile, scrcpyDevice,
         setScrcpyDevice, stdinText, setStdinText, busySvcId, pendingDeleteSvc, serviceNotice,
         copiedLog, debugExpanded, setDebugExpanded, savingServiceFlag, selectedAiServiceIds, aiSyncPromptVisible, setAiSyncPromptVisible,
          aiSyncPrompt, aiSyncPromptCopied, showAiSyncPrompt, copyAiSyncPrompt, toggleAiServiceSelection, isWin, groups,
