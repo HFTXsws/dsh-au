@@ -13,7 +13,9 @@ import {
   buildOfficialSyncItems,
   buildOfficialSyncItemsByProfile,
   buildPreferenceSyncItems,
+  computeLocalOfficialSettingsHash,
   computeOfficialSettingsHash,
+  decideStartupOfficialSyncAction,
   normalizeCloudSyncConfig,
   getAllCloudPluginIds,
   pushLocalOfficialSettingsToRepo,
@@ -561,7 +563,7 @@ test('pushLocalOfficialSettingsToRepo：dsh-sync 布局写入 cloud/dsh-au-prefe
   mkdirSync(path.join(repoRoot, 'dsh-sync', 'cloud'), { recursive: true });
   mkdirSync(dshHome, { recursive: true });
   writeFileSync(path.join(dshHome, 'dsh-au.config.json'), JSON.stringify({
-    features: { todo: false, fullAccessByDefault: true, blockGoalCreation: true, disconnectRemotesOnLock: true },
+    features: { todo: false, fullAccessByDefault: true, blockGoalCreation: true, disconnectRemotesOnLock: true, sidebarExtensions: { grokbot: false } },
   }));
 
   const pushed = pushLocalOfficialSettingsToRepo({
@@ -581,6 +583,7 @@ test('pushLocalOfficialSettingsToRepo：dsh-sync 布局写入 cloud/dsh-au-prefe
   assert.equal(payload.fullAccessByDefault, true);
   assert.equal(payload.blockGoalCreation, true);
   assert.equal(Object.hasOwn(payload, 'disconnectRemotesOnLock'), false);
+  assert.equal(Object.hasOwn(payload, 'sidebarExtensions'), false);
 });
 
 test('云偏好里的锁屏断开值不能覆盖这台电脑自己的开关', (t) => {
@@ -594,13 +597,15 @@ test('云偏好里的锁屏断开值不能覆盖这台电脑自己的开关', (t
   writeFileSync(path.join(cloudDir, 'dsh-au-preferences.json'), JSON.stringify({
     todo: true,
     disconnectRemotesOnLock: false,
+    sidebarExtensions: { grokbot: true },
   }));
   const localPath = path.join(dshHome, 'dsh-au.config.json');
-  writeFileSync(localPath, JSON.stringify({ features: { disconnectRemotesOnLock: true, todo: true } }));
+  writeFileSync(localPath, JSON.stringify({ features: { disconnectRemotesOnLock: true, sidebarExtensions: { grokbot: false, 'claude-workspace': false }, todo: true } }));
 
   assert.equal(syncOfficialDshAuPreferences({ repoRoot, dshHome }).updated, true);
   const result = JSON.parse(readFileSync(localPath, 'utf8'));
   assert.equal(result.features.disconnectRemotesOnLock, true);
+  assert.deepEqual(result.features.sidebarExtensions, { grokbot: false, 'claude-workspace': false });
   assert.equal(result.features.todo, true);
 });
 
@@ -850,4 +855,76 @@ test('新电脑首次同步时模型槽位保持空白，不借用其他设备�
   const result = syncOfficialDshAuPreferences({ repoRoot: dir, dshHome: path.join(dir, 'home'), preferences: ['modelShortcuts'] });
   assert.equal(result.preferenceMigration?.modelShortcutsFrom, undefined);
   assert.equal(existsSync(modelShortcutsPath), false, '本机不应写入借来的模型槽位');
+});
+
+test('computeLocalOfficialSettingsHash 与 decideStartupOfficialSyncAction：双基线防冲突判定覆盖全部场景', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'dsh-au-local-hash-'));
+  try {
+    const profileDir = path.join(dir, 'profiles', 'desktop');
+    mkdirSync(profileDir, { recursive: true });
+    const patchPath = path.join(profileDir, 'cordis.patch.yml');
+    const desktopPrefPath = path.join(dir, 'desktop-preferences.json');
+
+    writeFileSync(
+      patchPath,
+      '- id: ui-theme\n  config:\n    fontSize: 14\n- id: permission\n  config:\n    defaultPreset: danger-full-access\n',
+      'utf8',
+    );
+    writeFileSync(desktopPrefPath, '{"closeToTray":true}\n', 'utf8');
+
+    const h1 = computeLocalOfficialSettingsHash({ dshHome: dir, selectedItems: ['ui-theme', 'desktop-preferences'] });
+    // CRLF 换行差异不应改变哈希
+    writeFileSync(
+      patchPath,
+      '- id: ui-theme\r\n  config:\r\n    fontSize: 14\r\n- id: permission\r\n  config:\r\n    defaultPreset: danger-full-access\r\n',
+      'utf8',
+    );
+    const h1Crlf = computeLocalOfficialSettingsHash({ dshHome: dir, selectedItems: ['ui-theme', 'desktop-preferences'] });
+    assert.equal(h1Crlf, h1);
+
+    // 未勾选的块（permission）改动不应影响哈希
+    writeFileSync(
+      patchPath,
+      '- id: ui-theme\n  config:\n    fontSize: 14\n- id: permission\n  config:\n    defaultPreset: workspace-write\n',
+      'utf8',
+    );
+    const hUnselectedChanged = computeLocalOfficialSettingsHash({ dshHome: dir, selectedItems: ['ui-theme', 'desktop-preferences'] });
+    assert.equal(hUnselectedChanged, h1);
+
+    // 已勾选的块（ui-theme）改动应改变哈希
+    writeFileSync(
+      patchPath,
+      '- id: ui-theme\n  config:\n    fontSize: 16\n- id: permission\n  config:\n    defaultPreset: workspace-write\n',
+      'utf8',
+    );
+    const h2 = computeLocalOfficialSettingsHash({ dshHome: dir, selectedItems: ['ui-theme', 'desktop-preferences'] });
+    assert.notEqual(h2, h1);
+
+    // 1. 无本机基线且云端未变 -> 初始化本机基线
+    assert.equal(
+      decideStartupOfficialSyncAction({ cloudHash: 'c1', lastSyncedHash: 'c1', localHash: h1, lastLocalHash: '' }).action,
+      'init_local_baseline',
+    );
+    // 2. 仅云端变更 -> 自动拉取
+    assert.equal(
+      decideStartupOfficialSyncAction({ cloudHash: 'c2', lastSyncedHash: 'c1', localHash: h1, lastLocalHash: h1 }).action,
+      'pull',
+    );
+    // 3. 仅本机变更 -> 自动推送
+    assert.equal(
+      decideStartupOfficialSyncAction({ cloudHash: 'c1', lastSyncedHash: 'c1', localHash: h2, lastLocalHash: h1 }).action,
+      'push',
+    );
+    // 4. 双端均有变更 -> 暂停并报冲突
+    const conflictDecision = decideStartupOfficialSyncAction({ cloudHash: 'c2', lastSyncedHash: 'c1', localHash: h2, lastLocalHash: h1 });
+    assert.equal(conflictDecision.action, 'conflict');
+    assert.match(conflictDecision.reason, /冲突|暂停自动覆盖/);
+    // 5. 均未变更 -> 无操作
+    assert.equal(
+      decideStartupOfficialSyncAction({ cloudHash: 'c1', lastSyncedHash: 'c1', localHash: h1, lastLocalHash: h1 }).action,
+      'none',
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
