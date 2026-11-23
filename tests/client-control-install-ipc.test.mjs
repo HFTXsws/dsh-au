@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync } from 'node:fs';
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -49,6 +49,33 @@ test('different DSH profiles receive separate private paths and profile-bound sh
   assert.match(readFileSync(unixShim, 'utf8'), /^#!\/bin\/sh\n/);
   assert.match(readFileSync(unixShim, 'utf8'), /--profile "work"/);
   if (process.platform !== 'win32') assert.equal(statSync(unixShim).mode & 0o111, 0o111);
+});
+
+test('an npm-style .bin symlink is replaced without overwriting the CLI source', { skip: process.platform === 'win32' }, (t) => {
+  // npm/pnpm 会把 .bin/dsh-au-client-control 做成指向 cli.js 的软链；生成 shim 时不能顺着软链写回源码。
+  const root = temporaryDirectory(t, 'dsh-au-client-shim-link-');
+  const packageDir = join(root, 'node_modules', 'dsh-au');
+  const cliPath = join(packageDir, 'lib', 'client-control', 'cli.js');
+  const binDir = join(root, 'node_modules', '.bin');
+  mkdirSync(join(packageDir, 'lib', 'client-control'), { recursive: true });
+  mkdirSync(binDir, { recursive: true });
+  const cliSource = '#!/usr/bin/env node\n// original cli\n';
+  writeFileSync(cliPath, cliSource);
+  symlinkSync(join('..', 'dsh-au', 'lib', 'client-control', 'cli.js'), join(binDir, 'dsh-au-client-control'));
+
+  const [shim] = installClientControlShims({ binDir, packageDir, platform: 'darwin', profile: 'desktop' });
+
+  assert.equal(readFileSync(cliPath, 'utf8'), cliSource);
+  assert.equal(lstatSync(shim).isSymbolicLink(), false);
+  assert.match(readFileSync(shim, 'utf8'), /^#!\/bin\/sh\n/);
+
+  // 悬空软链同样要被替换成普通文件，而不是在软链目标位置创建文件。
+  const danglingTarget = join(root, 'missing-target');
+  rmSync(shim);
+  symlinkSync(danglingTarget, shim);
+  installClientControlShims({ binDir, packageDir, platform: 'darwin', profile: 'desktop' });
+  assert.equal(lstatSync(shim).isSymbolicLink(), false);
+  assert.throws(() => lstatSync(danglingTarget), { code: 'ENOENT' });
 });
 
 test('the installed command executes through the profile junction or symlink', (t) => {
