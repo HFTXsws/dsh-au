@@ -1,6 +1,6 @@
 {
   "name": "dsh-au",
-  "version": "0.2.2-rc.3-3",
+  "version": "0.2.2-rc.3-4",
   "description": "Multi-device workspace, cross-device Todo, model quick-switcher, mobile drawer, local service manager & Claude/Codex agent control for DeepSeek Harness · DSH 多机工作台插件：本机/远程二级工作区、跨设备待办、模型快捷切换、移动端抽屉、本地服务管理与 Claude/Codex 控制入口",
   "license": "MIT",
   "author": "dsh-au contributors",
