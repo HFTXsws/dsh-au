@@ -34,11 +34,24 @@ test('功能开关：todo 默认开启，权限与目标创建限制只有显式
       { disconnectRemotesOnLock },
       { todo: true, fullAccessByDefault: false, blockGoalCreation: false },
     ]),
+    [{ sidebarWorkbench: true }, { todo: true, fullAccessByDefault: false, blockGoalCreation: false, sidebarWorkbench: true }],
+    ...[null, false, 'true', 1, [], {}].map((sidebarWorkbench) => [
+      { sidebarWorkbench },
+      { todo: true, fullAccessByDefault: false, blockGoalCreation: false },
+    ]),
   ];
   assert.deepEqual(normalizeFeatures(undefined), DEFAULT_FEATURES);
   for (const [raw, expected] of cases) {
-    // 远程 DSH 管理缺字段时保持开启。
-    assert.deepEqual(normalizeFeatures(raw), { remoteManagement: true, disconnectRemotesOnLock: false, ...expected });
+    // 远程 DSH 管理缺字段时保持开启；侧边栏入口默认关闭；侧边栏扩展开关默认为空对象。
+    assert.deepEqual(normalizeFeatures(raw), { remoteManagement: true, disconnectRemotesOnLock: false, sidebarWorkbench: false, sidebarExtensions: {}, ...expected });
+  }
+  // 侧边栏私人扩展开关仅保留显式布尔值，脏数据和非对象一律丢弃。
+  assert.deepEqual(
+    normalizeFeatures({ sidebarExtensions: { grokbot: false, 'claude-workspace': true, bad: 'false', empty: 0, '  ': false } }).sidebarExtensions,
+    { grokbot: false, 'claude-workspace': true },
+  );
+  for (const bad of [null, undefined, [], 'grokbot', 123]) {
+    assert.deepEqual(normalizeFeatures({ sidebarExtensions: bad }).sidebarExtensions, {});
   }
   for (const remoteManagement of [undefined, null, 'false', 0, true]) {
     assert.equal(normalizeFeatures({ remoteManagement }).remoteManagement, true);
@@ -51,23 +64,29 @@ test('配置读写往返保留全部宿主功能开关，旧配置缺目标限�
   const previousHome = process.env.DSH_HOME;
   process.env.DSH_HOME = dir;
   try {
-    assert.deepEqual(loadConfig().features, { todo: true, remoteManagement: true, fullAccessByDefault: false, blockGoalCreation: false, disconnectRemotesOnLock: false });
+    assert.deepEqual(loadConfig().features, { todo: true, remoteManagement: true, fullAccessByDefault: false, blockGoalCreation: false, disconnectRemotesOnLock: false, sidebarWorkbench: false, sidebarExtensions: {} });
     const cfg = loadConfig();
-    cfg.features = normalizeFeatures({ todo: false, remoteManagement: true, fullAccessByDefault: true, blockGoalCreation: true, disconnectRemotesOnLock: true });
+    cfg.features = normalizeFeatures({ todo: false, remoteManagement: true, fullAccessByDefault: true, blockGoalCreation: true, disconnectRemotesOnLock: true, sidebarWorkbench: true, sidebarExtensions: { grokbot: false, 'claude-workspace': false } });
     saveConfig(cfg);
-    assert.deepEqual(loadConfig().features, { todo: false, remoteManagement: true, fullAccessByDefault: true, blockGoalCreation: true, disconnectRemotesOnLock: true });
+    assert.deepEqual(loadConfig().features, { todo: false, remoteManagement: true, fullAccessByDefault: true, blockGoalCreation: true, disconnectRemotesOnLock: true, sidebarWorkbench: true, sidebarExtensions: { grokbot: false, 'claude-workspace': false } });
 
     const filePath = join(dir, 'dsh-au.config.json');
     const raw = JSON.parse(readFileSync(filePath, 'utf8'));
     delete raw.features.blockGoalCreation;
     writeFileSync(filePath, JSON.stringify(raw), 'utf8');
-    assert.deepEqual(loadConfig().features, { todo: false, remoteManagement: true, fullAccessByDefault: true, blockGoalCreation: false, disconnectRemotesOnLock: true });
+    assert.deepEqual(loadConfig().features, { todo: false, remoteManagement: true, fullAccessByDefault: true, blockGoalCreation: false, disconnectRemotesOnLock: true, sidebarWorkbench: true, sidebarExtensions: { grokbot: false, 'claude-workspace': false } });
     delete raw.features.disconnectRemotesOnLock;
     writeFileSync(filePath, JSON.stringify(raw), 'utf8');
-    assert.deepEqual(loadConfig().features, { todo: false, remoteManagement: true, fullAccessByDefault: true, blockGoalCreation: false, disconnectRemotesOnLock: false });
+    assert.deepEqual(loadConfig().features, { todo: false, remoteManagement: true, fullAccessByDefault: true, blockGoalCreation: false, disconnectRemotesOnLock: false, sidebarWorkbench: true, sidebarExtensions: { grokbot: false, 'claude-workspace': false } });
+    delete raw.features.sidebarWorkbench;
+    writeFileSync(filePath, JSON.stringify(raw), 'utf8');
+    assert.deepEqual(loadConfig().features, { todo: false, remoteManagement: true, fullAccessByDefault: true, blockGoalCreation: false, disconnectRemotesOnLock: false, sidebarWorkbench: false, sidebarExtensions: { grokbot: false, 'claude-workspace': false } });
+    delete raw.features.sidebarExtensions;
+    writeFileSync(filePath, JSON.stringify(raw), 'utf8');
+    assert.deepEqual(loadConfig().features, { todo: false, remoteManagement: true, fullAccessByDefault: true, blockGoalCreation: false, disconnectRemotesOnLock: false, sidebarWorkbench: false, sidebarExtensions: {} });
     delete raw.features;
     writeFileSync(filePath, JSON.stringify(raw), 'utf8');
-    assert.deepEqual(loadConfig().features, { todo: true, remoteManagement: true, fullAccessByDefault: false, blockGoalCreation: false, disconnectRemotesOnLock: false });
+    assert.deepEqual(loadConfig().features, { todo: true, remoteManagement: true, fullAccessByDefault: false, blockGoalCreation: false, disconnectRemotesOnLock: false, sidebarWorkbench: false, sidebarExtensions: {} });
   } finally {
     rmSync(dir, { recursive: true, force: true });
     if (previousHome === undefined) delete process.env.DSH_HOME;
@@ -82,7 +101,11 @@ test('设置源码提供四个功能开关，目标创建限制与完全权限�
   assert.match(client, /callApi\('saveFeatures', \{ todo: Boolean\(next\) \}\)/);
   assert.match(client, /callApi\('saveFeatures', \{ fullAccessByDefault: Boolean\(next\) \}\)/);
   assert.match(client, /callApi\('saveFeatures', \{ blockGoalCreation: Boolean\(next\) \}\)/);
+  assert.match(client, /callApi\('saveFeatures', \{ sidebarWorkbench: Boolean\(next\) \}\)/);
+  assert.match(client, /callApi\('saveFeatures', \{ sidebarExtensions: \{ \[extId\]: Boolean\(next\) \} \}\)/);
+  assert.match(client, /h\(SidebarExtensionsFeatureGroup\)/);
   assert.match(client, /title: '启用待办面板'/);
+  assert.match(client, /title: '在侧边栏显示 DSH AU'/);
   assert.match(client, /title: '新开对话默认完全权限'/);
   assert.match(client, /title: '启用移动端优化'/);
   assert.match(client, /writeMobileFeatureEnabled\(next\)/);

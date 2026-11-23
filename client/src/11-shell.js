@@ -265,6 +265,73 @@
      * 常驻壳层：设备栏插入中心列顶部，远程 iframe 插入 shell.overlay。
      * 两处都是 root 作用域，因此切换本机对话与其它主面板时不会卸载 iframe。
      */
+    /** 独立执行「打开设置弹窗并切换到 DSH AU 标签页」，避免被 selectPanel(null) 的 effect 清理打断。 */
+    let dshAuSettingsOpenSeq = 0;
+    function openDshAuSettingsDialog() {
+      if (typeof document === 'undefined' || typeof window === 'undefined') return;
+      const seq = ++dshAuSettingsOpenSeq;
+      const findAuTab = () => {
+        const dialogs = document.querySelectorAll('[role="dialog"]');
+        for (const dialog of dialogs) {
+          const buttons = dialog.querySelectorAll('button, [role="tab"]');
+          for (const btn of buttons) {
+            if ((btn.textContent || '').trim() === 'DSH AU') return btn;
+          }
+        }
+        return null;
+      };
+      // 账号插件接管 settings.launcher 后，点击左下角按钮会先弹出包含「设置」的菜单，需要再点一次「设置」才打开设置弹窗。
+      const findSettingsMenuItem = () => {
+        const menus = document.querySelectorAll('[role="menu"]');
+        for (const menu of menus) {
+          const items = menu.querySelectorAll('[role="menuitem"], button');
+          for (const item of items) {
+            const text = (item.textContent || '').trim();
+            if (text === '设置' || text.startsWith('设置') || text === 'Settings' || text.startsWith('Settings')) {
+              return item;
+            }
+          }
+        }
+        return null;
+      };
+      const existingTab = findAuTab();
+      if (existingTab) {
+        existingTab.click();
+        return;
+      }
+      let menuClicked = false;
+      const existingMenuItem = findSettingsMenuItem();
+      if (existingMenuItem) {
+        menuClicked = true;
+        existingMenuItem.click();
+      } else {
+        const trigger = document.querySelector('[data-slot="sidebar.settings"] button[aria-haspopup]')
+          || document.querySelector('[data-slot="sidebar.settings"] button');
+        if (trigger && typeof trigger.click === 'function') {
+          trigger.click();
+        }
+      }
+      let attempts = 0;
+      const trySelect = () => {
+        if (seq !== dshAuSettingsOpenSeq) return;
+        const tab = findAuTab();
+        if (tab) {
+          tab.click();
+          return;
+        }
+        if (!menuClicked) {
+          const menuItem = findSettingsMenuItem();
+          if (menuItem) {
+            menuClicked = true;
+            menuItem.click();
+          }
+        }
+        attempts += 1;
+        if (attempts < 40) window.setTimeout(trySelect, 16);
+      };
+      window.setTimeout(trySelect, 0);
+    }
+
     function AuFleetShell({ selectPanel, collapseSidebar, expandSidebar, toggleSidebar, usePanelInfo, openLocalSession, openBridgedLocalSession, readLocalSessionId }) {
       const doToggleSidebar = useCallback(() => {
         if (typeof toggleSidebar === 'function') {
@@ -558,11 +625,12 @@
         };
       }, [hosts]);
 
-      // 兼容侧栏既有「Au 多机」入口：点击后回到会话主面板，常驻栏不发生重建。
-      // 点击设置、插件市场等其他主面板时，切回本机视图，避免远端舞台遮盖设置/插件面板。
+      // 点击侧边栏「DSH AU」入口时：保持当前主界面不变，打开 DSH 设置弹窗并切换到 DSH AU 标签页。
+      // 点击设置、插件市场等其他主面板时，切回本机视图，避免远端舞台遮盖主面板内容。
       useEffect(() => {
         if (activePanelId === PANEL_ID) {
           selectPanel(null);
+          openDshAuSettingsDialog();
           return;
         }
         if (activePanelId && (activeId || activeExtStage)) {
@@ -1143,7 +1211,13 @@
 
       // 远程 DSH 管理总开关：关闭时不渲染设备栏、远程舞台与悬浮胶囊（放在全部 state 之后，保持 hook 顺序稳定）。
       // featuresStore 定义在设置页片段；单独加载外壳时按默认开启处理。
-      const remoteManagementEnabled = typeof useFeatures === 'function' ? useFeatures().remoteManagement !== false : true;
+      const featuresSnap = typeof useFeatures === 'function' ? useFeatures() : null;
+      const remoteManagementEnabled = featuresSnap ? featuresSnap.remoteManagement !== false : true;
+      // 本机侧边栏扩展开关：优先读 featuresStore（设置页切换即时生效），首屏未加载完时回退用 state.self.features 防闪烁。
+      const sidebarExtFlags = featuresSnap?.loaded
+        ? (featuresSnap.sidebarExtensions || {})
+        : (state.self?.features?.sidebarExtensions || {});
+      const visibleSidebarExtensions = sidebarExtensions.filter((ext) => sidebarExtFlags[ext.id] !== false);
 
       // 设置页「管理远程设备」按钮请求打开远程设备管理弹窗。
       useEffect(() => {
@@ -1156,6 +1230,13 @@
       useEffect(() => {
         if (!remoteManagementEnabled && activeId) selectLocal({ reason: 'remote-management-off' });
       }, [remoteManagementEnabled, activeId, selectLocal]);
+
+      // 关闭某个侧边栏扩展时，若当前正停留在它的主舞台，立即切回本机对话。
+      useEffect(() => {
+        if (activeExtStage && sidebarExtFlags[activeExtStage.extId] === false) {
+          selectLocal({ reason: 'sidebar-ext-off' });
+        }
+      }, [activeExtStage, sidebarExtFlags, selectLocal]);
 
       // 若已打开的远端后来确认是本机映射，立即回到本机而不是留下空白舞台。
       useEffect(() => {
@@ -1629,9 +1710,9 @@
         remoteManagementEnabled && hosts && !topbarCollapsed ? ReactDOM.createPortal(topbar, hosts.topHost) : null,
         (remoteManagementEnabled || activeExtStage !== null) && hosts ? ReactDOM.createPortal(stage, hosts.stageHost) : null,
         remoteManagementEnabled && topbarCollapsed ? ReactDOM.createPortal(floatingCapsule, hosts?.stageHost || document.body) : null,
-        sidebarExtensions.length > 0
+        visibleSidebarExtensions.length > 0
           ? h(PrivateSidebarExtensionsHost, {
-              extensions: sidebarExtensions,
+              extensions: visibleSidebarExtensions,
               activeExtStage,
               activeNativeSession,
               showExtStage,

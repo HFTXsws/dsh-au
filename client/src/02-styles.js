@@ -131,6 +131,7 @@
         .dsh-au-lan-password-form { flex-basis:100%; }
         .dsh-au-remote-empty { padding:36px 16px; color:#94a3b8; text-align:center; font-size:12px; }
         .dsh-au-wb-modal { width:min(1056px,78vw); height:min(684px,88dvh); background:#11151e; border:1px solid #2c354d; border-radius:12px; box-shadow:0 20px 56px rgba(3,7,18,.75); display:flex; flex-direction:column; overflow:hidden; color:#f1f5f9; font-size:13.3px; }
+        .dsh-au-wb-modal.dsh-au-wb-panel { width:100%; height:100%; max-width:none; max-height:none; border:0; border-radius:0; box-shadow:none; }
         .dsh-au-wb-head { padding:10px 14px; border-bottom:1px solid #1f2637; background:#161b26; display:flex; align-items:center; justify-content:space-between; gap:10px; flex-shrink:0; }
         .dsh-au-wb-search { flex:1; min-width:0; max-width:420px; padding:7px 11px; border-radius:6px; border:1px solid #2c354d; background:#0b0d12; color:#f1f5f9; font-size:13px; outline:none; }
         .dsh-au-wb-search:focus { border-color:#3b82f6; box-shadow:0 0 0 2px rgba(59,130,246,.22); }
@@ -219,6 +220,7 @@
         /* 平板：左侧导航保留，详情面板下沉到内容下方 */
         @media (max-width:1024px) {
           .dsh-au-wb-modal { width:min(94vw,760px); height:min(86dvh,720px); }
+          .dsh-au-wb-modal.dsh-au-wb-panel { width:100%; height:100%; }
           .dsh-au-wb-body { grid-template-columns:150px minmax(0,1fr); grid-template-rows:minmax(0,1fr) auto; }
           .dsh-au-wb-nav { grid-row:1 / span 2; }
           .dsh-au-wb-inspector { grid-column:2; max-height:40dvh; border-left:0; border-top:1px solid #1f2637; }
@@ -227,6 +229,7 @@
         /* 手机：整屏抽屉，导航改为横向滚动条，页面统一纵向滚动 */
         @media (max-width:720px) {
           .dsh-au-wb-modal { width:100vw; height:100dvh; max-height:none; border-radius:0; border:0; font-size:14.5px; padding-bottom:env(safe-area-inset-bottom); }
+          .dsh-au-wb-modal.dsh-au-wb-panel { width:100%; height:100%; padding-bottom:0; }
           .dsh-au-wb-head { flex-wrap:wrap; gap:8px; padding:8px 10px; }
           .dsh-au-wb-search { max-width:none; width:100%; flex:1 1 100%; }
           .dsh-au-wb-body { display:flex; flex-direction:column; overflow-y:auto; }

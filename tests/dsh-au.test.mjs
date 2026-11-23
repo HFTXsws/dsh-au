@@ -281,8 +281,10 @@ test('client mounts a root-resident top bar and preserves remote iframe instance
   assert.match(client, /\.dsh-au-remote-row \{ box-sizing:border-box; width:100%;/);
   assert.match(client, /\.dsh-au-remote-row-name \{ display:inline-flex; align-items:center; gap:7px; font-size:13px; line-height:18px; font-weight:600; color:#f1f5f9; white-space:nowrap; \}/);
   assert.match(client, /\.dsh-au-remote-row-name svg \{ width:15px; height:15px; flex:0 0 15px;/);
-  // 顶栏是唯一入口，侧边面板列表不再注册。
-  assert.doesNotMatch(client, /ctx\.slots\.inject\('sidebar\.panellist'/);
+  // 侧边栏入口默认不注册，仅当用户开启 sidebarWorkbench 开关后才向 sidebar.panellist 注册，点击后打开设置弹窗并切换到 DSH AU。
+  assert.match(client, /featuresStore\.snapshot\.sidebarWorkbench === true/);
+  assert.match(client, /ctx\.slots\.inject\('sidebar\.panellist'/);
+  assert.match(client, /\[data-slot="sidebar\.settings"\] button/);
   // 保留全部状态样式；实际主题色与对比度由浏览器回归验证，不再锁住单个深色十六进制值。
   for (const status of ['idle', 'busy', 'done', 'waiting', 'error']) {
     assert.match(client, new RegExp(`\\.dsh-au-dot\\.${status} \\{`));

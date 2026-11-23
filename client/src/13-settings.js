@@ -1,7 +1,7 @@
     /** 内置功能开关存宿主机配置；新建目标限制默认关闭，不投射到其他主机。 */
     const featuresStore = {
       snapshot: {
-        todo: false, remoteManagement: true, fullAccessByDefault: false, blockGoalCreation: false, disconnectRemotesOnLock: false, goalCreationError: '',
+        todo: false, remoteManagement: true, fullAccessByDefault: false, blockGoalCreation: false, disconnectRemotesOnLock: false, sidebarWorkbench: false, sidebarExtensions: {}, sidebarExtensionCatalog: [], goalCreationError: '',
         loaded: false, busy: false, error: '',
         /** 自动续跑默认关闭，且没有规则。 */
         autoContinue: { enabled: false, retryDelaySec: 60, maxRetries: 5, compactOnDisconnect: true, continueOnTruncate: true, prompt: '继续', rules: [] },
@@ -67,6 +67,11 @@
             fullAccessByDefault: res.features.fullAccessByDefault === true,
             blockGoalCreation: res.features.blockGoalCreation === true,
             disconnectRemotesOnLock: res.features.disconnectRemotesOnLock === true,
+            sidebarWorkbench: res.features.sidebarWorkbench === true,
+            sidebarExtensions: res.features.sidebarExtensions && typeof res.features.sidebarExtensions === 'object' && !Array.isArray(res.features.sidebarExtensions)
+              ? res.features.sidebarExtensions
+              : {},
+            sidebarExtensionCatalog: Array.isArray(res.sidebarExtensionCatalog) ? res.sidebarExtensionCatalog : [],
             goalCreationError: typeof res.goalCreationError === 'string' ? res.goalCreationError : '',
             loaded: true,
             error: '',
@@ -128,6 +133,40 @@
         }
         publishFeatures({
           disconnectRemotesOnLock: res.features.disconnectRemotesOnLock,
+          busy: false,
+        });
+      } catch (error) {
+        publishFeatures({ busy: false, error: error?.message || '保存失败，请稍后重试' });
+      }
+    }
+
+    /** 保存侧边栏工作台入口开关；开启后在左侧边栏添加 DSH AU 入口。 */
+    async function saveSidebarWorkbenchFeature(next) {
+      publishFeatures({ busy: true, error: '' });
+      try {
+        const res = await callApi('saveFeatures', { sidebarWorkbench: Boolean(next) });
+        if (!res?.ok || typeof res.features?.sidebarWorkbench !== 'boolean') {
+          throw new Error(res?.error || '保存失败，请稍后重试');
+        }
+        publishFeatures({
+          sidebarWorkbench: res.features.sidebarWorkbench,
+          busy: false,
+        });
+      } catch (error) {
+        publishFeatures({ busy: false, error: error?.message || '保存失败，请稍后重试' });
+      }
+    }
+
+    /** 保存本机单个侧边栏私人扩展的挂载开关；仅落盘本机，不同步到其它设备。 */
+    async function saveSidebarExtensionFeature(extId, next) {
+      publishFeatures({ busy: true, error: '' });
+      try {
+        const res = await callApi('saveFeatures', { sidebarExtensions: { [extId]: Boolean(next) } });
+        if (!res?.ok || !res.features?.sidebarExtensions || typeof res.features.sidebarExtensions !== 'object') {
+          throw new Error(res?.error || '保存失败，请稍后重试');
+        }
+        publishFeatures({
+          sidebarExtensions: res.features.sidebarExtensions,
           busy: false,
         });
       } catch (error) {
@@ -1997,11 +2036,16 @@
               },
             },
             '选择同步项',
-            totalDiffCount > 0
-              ? h('span', { className: 'dsh-au-cloud-sync-outer-diff' }, `${totalDiffCount} 项待同步`)
-              : null
+            cloudSync.conflict
+              ? h('span', { className: 'dsh-au-cloud-sync-outer-diff' }, '双端冲突')
+              : totalDiffCount > 0
+                ? h('span', { className: 'dsh-au-cloud-sync-outer-diff' }, `${totalDiffCount} 项待同步`)
+                : null
           ),
         }),
+        cloudSync.conflict
+          ? h('div', { className: 'dsh-au-settings-note is-warn', role: 'alert' }, cloudSync.conflictReason || '检测到本机与云端均有未同步改动，已暂停自动覆盖，请点「选择同步项」手动推送或拉取。')
+          : null,
         h(SettingsItem, {
           title: '私人同步仓库路径',
           description: '指向包含 dsh-sync 或 dsh-au/sync 的本地仓库；留空则只用插件自带的示例 sync/。',
@@ -2208,13 +2252,70 @@
       );
     }
 
+    function SidebarWorkbenchFeatureGroup() {
+      const features = useFeatures();
+      const enabled = features.sidebarWorkbench === true;
+      return h(FeatureSwitchGroup, {
+        id: 'sidebar-workbench',
+        heading: '侧边栏入口',
+        title: '在侧边栏显示 DSH AU',
+        description: '打开后在左侧边栏顶部导航区添加「DSH AU」入口，点击即可打开设置弹窗并切换到 DSH AU。',
+        checked: enabled,
+        disabled: !features.loaded || features.busy,
+        onToggle: () => { void saveSidebarWorkbenchFeature(!enabled); },
+        hint: features.error || (enabled ? '已开启：左侧边栏已显示「DSH AU」入口。' : '已关闭：侧边栏不显示「DSH AU」入口。'),
+      });
+    }
+
+    /** 侧边栏私人扩展（如 GrokBot、Claude）本机独立开关组；无可用侧边栏扩展时隐藏。 */
+    function SidebarExtensionsFeatureGroup() {
+      const features = useFeatures();
+      const catalog = Array.isArray(features.sidebarExtensionCatalog) ? features.sidebarExtensionCatalog : [];
+      if (catalog.length === 0) return null;
+      const flags = features.sidebarExtensions && typeof features.sidebarExtensions === 'object'
+        ? features.sidebarExtensions
+        : {};
+      const headingId = 'dsh-au-feature-sidebar-extensions-title';
+      return h(
+        'section',
+        { className: 'dsh-au-settings-group', 'aria-labelledby': headingId },
+        h('h3', { id: headingId }, '侧边栏扩展'),
+        catalog.map((ext) => {
+          const enabled = flags[ext.id] !== false;
+          const itemTitleId = `dsh-au-feature-sidebar-ext-${ext.id}`;
+          return h(SettingsItem, {
+            key: ext.id,
+            title: `在侧边栏挂载 ${ext.title}`,
+            description: `控制本机是否在左侧边栏加载「${ext.title}」扩展（${ext.id}）。关闭后立即卸载且不再轮询，只保存在这台电脑，不会同步到其他电脑。`,
+            hint: features.error || (enabled ? '已开启：当前电脑侧边栏已挂载该扩展。' : '已关闭：当前电脑侧边栏不挂载该扩展。'),
+            control: h(
+              'button',
+              {
+                type: 'button',
+                role: 'switch',
+                className: 'dsh-au-switch',
+                'aria-checked': enabled,
+                'aria-label': `在侧边栏挂载 ${ext.title}`,
+                id: itemTitleId,
+                disabled: !features.loaded || features.busy,
+                onClick: () => { void saveSidebarExtensionFeature(ext.id, !enabled); },
+              },
+              h('span', { className: 'dsh-au-switch-knob', 'aria-hidden': 'true' })
+            ),
+          });
+        })
+      );
+    }
+
     /** 设置页按使用频率分组：日常工作台、对话权限默认展开，快捷键和同步默认收起。 */
     function AuSettingsSection() {
       return h(
         'div',
         { className: 'dsh-au-settings-page' },
-        h(SettingsCategory, { id: 'workspace', title: '工作台', hint: '远程 · 待办 · 移动端 · 窗口', defaultOpen: true },
+        h(SettingsCategory, { id: 'workspace', title: '工作台', hint: '远程 · 侧边栏 · 待办 · 移动端 · 窗口', defaultOpen: true },
           h(RemoteManagementFeatureGroup),
+          h(SidebarWorkbenchFeatureGroup),
+          h(SidebarExtensionsFeatureGroup),
           h(TodoFeatureGroup),
           h(MobileFeatureGroup),
           h(WindowMemoryFeatureGroup),

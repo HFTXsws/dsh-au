@@ -67,7 +67,7 @@
      * 1. 自动识别当前系统 (win32 / darwin)，联动菜单 71/21/62 与 .ps1/.sh 命令预览；
      * 2. 纳管 16 项独立后台服务（不随 DSH 关闭而退出），支持按电脑独立组合、开机自启与随 DSH 自启。
      */
-    function UnifiedWorkbenchModal({ initialTab = 'fav', onClose }) {
+    function UnifiedWorkbenchModal({ initialTab = 'fav', onClose, embedded = false }) {
       const [wb, setWbState] = useState(cachedWorkbenchSnapshot);
       const setWb = useCallback((updater) => {
         setWbState((prev) => {
@@ -847,95 +847,108 @@
         h('span', { className: 'dsh-au-nav-count' }, `${count}`)
       );
 
+      const workbenchBox = h(
+        'div',
+        embedded
+          ? { className: 'dsh-au-wb-modal dsh-au-wb-panel' }
+          : { className: 'dsh-au-wb-modal', role: 'dialog', 'aria-modal': 'true' },
+        privateExtensions.map((ext) => ext.styleText ? h('style', { key: `ext-style-${ext.id}` }, ext.styleText) : null),
+        privateExtensions.map((ext) => h(PrivateExtensionRunner, {
+          key: `ext-runner-${ext.id}`,
+          ext,
+          active: activeTab === `ext:${ext.id}`,
+          parentSeq: parentExtSeqRef.current,
+          runtimesRef: extRuntimesRef,
+          onExtUpdate: triggerExtRender,
+        })),
+        h(
+          'header',
+          { className: 'dsh-au-wb-head' },
+          h('input', {
+            className: 'dsh-au-wb-search',
+            placeholder: '输入菜单序号、服务名或关键字检索...',
+            value: search,
+            // 开窗不主动聚焦，避免移动端自动弹出键盘；用户仍可点击搜索。
+            autoFocus: false,
+            onChange: (e) => {
+              const v = e.target.value;
+              setSearch(v);
+              const found = findMenuItem(v.trim());
+              if (found) setSelectedCode(found.item.code);
+            },
+          }),
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+            h('button', {
+              type: 'button',
+              className: 'dsh-au-wb-pill on',
+              onClick: () => setOsOverride(isWin ? 'darwin' : 'win32'),
+              title: '自动识别当前系统；点击可切换预览 Windows / macOS 专属菜单项',
+            }, isWin ? '系统识别: Windows (.ps1)' : '系统识别: macOS (.sh)'),
+            h('button', {
+              type: 'button',
+              className: 'dsh-au-btn',
+              disabled: busySvcId === '__refresh__',
+              onClick: () => void handleManualRefresh(),
+              title: '立即重新检查后台服务运行状态（默认 1 小时自动缓存）',
+            }, busySvcId === '__refresh__' ? '刷新中…' : '刷新'),
+            !embedded && typeof onClose === 'function'
+              ? h('button', { type: 'button', className: 'dsh-au-btn', onClick: onClose }, '关闭 (Esc)')
+              : null
+          )
+        ),
+        h(
+          'div',
+          { className: 'dsh-au-wb-body' },
+          h(
+            'nav',
+            { className: 'dsh-au-wb-nav' },
+            navItem('fav', 'nav-fav', h(StarIcon), '常用收藏', favorites.length),
+            navItem('services', 'nav-services', h(ServicesIcon), '后台服务管理', localServices.length),
+            navItem('plugins', 'nav-plugins', h(PluginIcon), '插件管理', localDshPlugins.length),
+            privateExtensions.map((ext) => {
+              const tabKey = `ext:${ext.id}`;
+              const iconNode = ext.iconSvg
+                ? h('span', { style: { display: 'inline-flex', width: '16px', height: '16px' }, dangerouslySetInnerHTML: { __html: ext.iconSvg } })
+                : h(ExtensionIcon);
+              const badge = extRuntimesRef.current[ext.id]?.badge ?? '—';
+              return navItem(tabKey, `nav-ext-${ext.id}`, iconNode, ext.title, badge);
+            }),
+            navItem('all', 'nav-all', h(CommandMenuIcon), '全部菜单指令', totalMenuItems),
+            // 菜单分组是二级项：用同尺寸圆点占住图标槽位，标题仍与上面四个页签左对齐。
+            groups.map((g) => h(
+              'button',
+              { key: g.id, type: 'button', className: `dsh-au-wb-navbtn ${activeTab === g.id ? 'active' : ''}`, onClick: () => setActiveTab(g.id) },
+              h('span', { className: 'dsh-au-nav-main' }, [
+                h('span', { key: 'icon', className: 'dsh-au-nav-icon' }, h('span', { className: 'dsh-au-nav-dot' })),
+                h('span', { key: 'label', className: 'dsh-au-nav-label' }, g.title),
+              ]),
+              h('span', { className: 'dsh-au-nav-count' }, `${(g.items || []).length}`)
+            ))
+          ),
+          h('section', { className: 'dsh-au-wb-center' }, renderCenterContent(scope)),
+          h('aside', { className: 'dsh-au-wb-inspector' }, renderInspector(scope))
+        ),
+        h(
+          'footer',
+          { className: 'dsh-au-wb-foot' },
+          h('span', null, '支持序号直达 (11-71) · 双击无参卡片直接执行 · 后台服务独立于 DSH 运行，支持按电脑保存自启组合'),
+          h('span', null, `本机: ${wb?.selfHostname || 'DSH'} · SSOT: scripts/menu.json`)
+        )
+      );
+
+      if (embedded) return workbenchBox;
+
       return h(
         'div',
         { className: 'dsh-au-mask', onClick: (e) => { if (e.target === e.currentTarget) onClose(); } },
-        h(
-          'div',
-          { className: 'dsh-au-wb-modal', role: 'dialog', 'aria-modal': 'true' },
-          privateExtensions.map((ext) => ext.styleText ? h('style', { key: `ext-style-${ext.id}` }, ext.styleText) : null),
-          privateExtensions.map((ext) => h(PrivateExtensionRunner, {
-            key: `ext-runner-${ext.id}`,
-            ext,
-            active: activeTab === `ext:${ext.id}`,
-            parentSeq: parentExtSeqRef.current,
-            runtimesRef: extRuntimesRef,
-            onExtUpdate: triggerExtRender,
-          })),
-          h(
-            'header',
-            { className: 'dsh-au-wb-head' },
-            h('input', {
-              className: 'dsh-au-wb-search',
-              placeholder: '输入菜单序号、服务名或关键字检索...',
-              value: search,
-              // 开窗不主动聚焦，避免移动端自动弹出键盘；用户仍可点击搜索。
-              autoFocus: false,
-              onChange: (e) => {
-                const v = e.target.value;
-                setSearch(v);
-                const found = findMenuItem(v.trim());
-                if (found) setSelectedCode(found.item.code);
-              },
-            }),
-            h(
-              'div',
-              { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
-              h('button', {
-                type: 'button',
-                className: 'dsh-au-wb-pill on',
-                onClick: () => setOsOverride(isWin ? 'darwin' : 'win32'),
-                title: '自动识别当前系统；点击可切换预览 Windows / macOS 专属菜单项',
-              }, isWin ? '系统识别: Windows (.ps1)' : '系统识别: macOS (.sh)'),
-              h('button', {
-                type: 'button',
-                className: 'dsh-au-btn',
-                disabled: busySvcId === '__refresh__',
-                onClick: () => void handleManualRefresh(),
-                title: '立即重新检查后台服务运行状态（默认 1 小时自动缓存）',
-              }, busySvcId === '__refresh__' ? '刷新中…' : '刷新'),
-              h('button', { type: 'button', className: 'dsh-au-btn', onClick: onClose }, '关闭 (Esc)')
-            )
-          ),
-          h(
-            'div',
-            { className: 'dsh-au-wb-body' },
-            h(
-              'nav',
-              { className: 'dsh-au-wb-nav' },
-              navItem('fav', 'nav-fav', h(StarIcon), '常用收藏', favorites.length),
-              navItem('services', 'nav-services', h(ServicesIcon), '后台服务管理', localServices.length),
-              navItem('plugins', 'nav-plugins', h(PluginIcon), '插件管理', localDshPlugins.length),
-              privateExtensions.map((ext) => {
-                const tabKey = `ext:${ext.id}`;
-                const iconNode = ext.iconSvg
-                  ? h('span', { style: { display: 'inline-flex', width: '16px', height: '16px' }, dangerouslySetInnerHTML: { __html: ext.iconSvg } })
-                  : h(ExtensionIcon);
-                const badge = extRuntimesRef.current[ext.id]?.badge ?? '—';
-                return navItem(tabKey, `nav-ext-${ext.id}`, iconNode, ext.title, badge);
-              }),
-              navItem('all', 'nav-all', h(CommandMenuIcon), '全部菜单指令', totalMenuItems),
-              // 菜单分组是二级项：用同尺寸圆点占住图标槽位，标题仍与上面四个页签左对齐。
-              groups.map((g) => h(
-                'button',
-                { key: g.id, type: 'button', className: `dsh-au-wb-navbtn ${activeTab === g.id ? 'active' : ''}`, onClick: () => setActiveTab(g.id) },
-                h('span', { className: 'dsh-au-nav-main' }, [
-                  h('span', { key: 'icon', className: 'dsh-au-nav-icon' }, h('span', { className: 'dsh-au-nav-dot' })),
-                  h('span', { key: 'label', className: 'dsh-au-nav-label' }, g.title),
-                ]),
-                h('span', { className: 'dsh-au-nav-count' }, `${(g.items || []).length}`)
-              ))
-            ),
-            h('section', { className: 'dsh-au-wb-center' }, renderCenterContent(scope)),
-            h('aside', { className: 'dsh-au-wb-inspector' }, renderInspector(scope))
-          ),
-          h(
-            'footer',
-            { className: 'dsh-au-wb-foot' },
-            h('span', null, '支持序号直达 (11-71) · 双击无参卡片直接执行 · 后台服务独立于 DSH 运行，支持按电脑保存自启组合'),
-            h('span', null, `本机: ${wb?.selfHostname || 'DSH'} · SSOT: scripts/menu.json`)
-          )
-        )
+        workbenchBox
       );
+    }
+
+    /** 侧边栏入口打开的嵌入式主面板：复用统一工作台全部内容并铺满主区域。 */
+    function UnifiedWorkbenchPanel() {
+      return h(UnifiedWorkbenchModal, { initialTab: 'fav', embedded: true });
     }
 

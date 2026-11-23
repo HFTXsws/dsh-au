@@ -2284,6 +2284,7 @@ window.__ModuleLoader__.load({
         .dsh-au-lan-password-form { flex-basis:100%; }
         .dsh-au-remote-empty { padding:36px 16px; color:#94a3b8; text-align:center; font-size:12px; }
         .dsh-au-wb-modal { width:min(1056px,78vw); height:min(684px,88dvh); background:#11151e; border:1px solid #2c354d; border-radius:12px; box-shadow:0 20px 56px rgba(3,7,18,.75); display:flex; flex-direction:column; overflow:hidden; color:#f1f5f9; font-size:13.3px; }
+        .dsh-au-wb-modal.dsh-au-wb-panel { width:100%; height:100%; max-width:none; max-height:none; border:0; border-radius:0; box-shadow:none; }
         .dsh-au-wb-head { padding:10px 14px; border-bottom:1px solid #1f2637; background:#161b26; display:flex; align-items:center; justify-content:space-between; gap:10px; flex-shrink:0; }
         .dsh-au-wb-search { flex:1; min-width:0; max-width:420px; padding:7px 11px; border-radius:6px; border:1px solid #2c354d; background:#0b0d12; color:#f1f5f9; font-size:13px; outline:none; }
         .dsh-au-wb-search:focus { border-color:#3b82f6; box-shadow:0 0 0 2px rgba(59,130,246,.22); }
@@ -2372,6 +2373,7 @@ window.__ModuleLoader__.load({
         /* 平板：左侧导航保留，详情面板下沉到内容下方 */
         @media (max-width:1024px) {
           .dsh-au-wb-modal { width:min(94vw,760px); height:min(86dvh,720px); }
+          .dsh-au-wb-modal.dsh-au-wb-panel { width:100%; height:100%; }
           .dsh-au-wb-body { grid-template-columns:150px minmax(0,1fr); grid-template-rows:minmax(0,1fr) auto; }
           .dsh-au-wb-nav { grid-row:1 / span 2; }
           .dsh-au-wb-inspector { grid-column:2; max-height:40dvh; border-left:0; border-top:1px solid #1f2637; }
@@ -2380,6 +2382,7 @@ window.__ModuleLoader__.load({
         /* 手机：整屏抽屉，导航改为横向滚动条，页面统一纵向滚动 */
         @media (max-width:720px) {
           .dsh-au-wb-modal { width:100vw; height:100dvh; max-height:none; border-radius:0; border:0; font-size:14.5px; padding-bottom:env(safe-area-inset-bottom); }
+          .dsh-au-wb-modal.dsh-au-wb-panel { width:100%; height:100%; padding-bottom:0; }
           .dsh-au-wb-head { flex-wrap:wrap; gap:8px; padding:8px 10px; }
           .dsh-au-wb-search { max-width:none; width:100%; flex:1 1 100%; }
           .dsh-au-wb-body { display:flex; flex-direction:column; overflow-y:auto; }
@@ -3709,6 +3712,16 @@ window.__ModuleLoader__.load({
         h('rect', { key: 'c', x: 3, y: 13, width: 8, height: 8, rx: 1.5 }),
         h('path', { key: 'd', d: 'M17 13v8M13 17h8' }),
       ]);
+    }
+    /** 侧边栏「DSH AU」入口图标：遵循宿主 sidebar.panellist 的 size 参数。 */
+    function SidebarWorkbenchIcon(props) {
+      const size = props?.size ?? 16;
+      return h(
+        'svg',
+        { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
+        h('circle', { key: 'center', cx: 12, cy: 12, r: 3 }),
+        h('path', { key: 'teeth', d: 'M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z' })
+      );
     }
 
 //#endregion
@@ -5283,7 +5296,7 @@ window.__ModuleLoader__.load({
      * 1. 自动识别当前系统 (win32 / darwin)，联动菜单 71/21/62 与 .ps1/.sh 命令预览；
      * 2. 纳管 16 项独立后台服务（不随 DSH 关闭而退出），支持按电脑独立组合、开机自启与随 DSH 自启。
      */
-    function UnifiedWorkbenchModal({ initialTab = 'fav', onClose }) {
+    function UnifiedWorkbenchModal({ initialTab = 'fav', onClose, embedded = false }) {
       const [wb, setWbState] = useState(cachedWorkbenchSnapshot);
       const setWb = useCallback((updater) => {
         setWbState((prev) => {
@@ -6063,96 +6076,109 @@ window.__ModuleLoader__.load({
         h('span', { className: 'dsh-au-nav-count' }, `${count}`)
       );
 
+      const workbenchBox = h(
+        'div',
+        embedded
+          ? { className: 'dsh-au-wb-modal dsh-au-wb-panel' }
+          : { className: 'dsh-au-wb-modal', role: 'dialog', 'aria-modal': 'true' },
+        privateExtensions.map((ext) => ext.styleText ? h('style', { key: `ext-style-${ext.id}` }, ext.styleText) : null),
+        privateExtensions.map((ext) => h(PrivateExtensionRunner, {
+          key: `ext-runner-${ext.id}`,
+          ext,
+          active: activeTab === `ext:${ext.id}`,
+          parentSeq: parentExtSeqRef.current,
+          runtimesRef: extRuntimesRef,
+          onExtUpdate: triggerExtRender,
+        })),
+        h(
+          'header',
+          { className: 'dsh-au-wb-head' },
+          h('input', {
+            className: 'dsh-au-wb-search',
+            placeholder: '输入菜单序号、服务名或关键字检索...',
+            value: search,
+            // 开窗不主动聚焦，避免移动端自动弹出键盘；用户仍可点击搜索。
+            autoFocus: false,
+            onChange: (e) => {
+              const v = e.target.value;
+              setSearch(v);
+              const found = findMenuItem(v.trim());
+              if (found) setSelectedCode(found.item.code);
+            },
+          }),
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+            h('button', {
+              type: 'button',
+              className: 'dsh-au-wb-pill on',
+              onClick: () => setOsOverride(isWin ? 'darwin' : 'win32'),
+              title: '自动识别当前系统；点击可切换预览 Windows / macOS 专属菜单项',
+            }, isWin ? '系统识别: Windows (.ps1)' : '系统识别: macOS (.sh)'),
+            h('button', {
+              type: 'button',
+              className: 'dsh-au-btn',
+              disabled: busySvcId === '__refresh__',
+              onClick: () => void handleManualRefresh(),
+              title: '立即重新检查后台服务运行状态（默认 1 小时自动缓存）',
+            }, busySvcId === '__refresh__' ? '刷新中…' : '刷新'),
+            !embedded && typeof onClose === 'function'
+              ? h('button', { type: 'button', className: 'dsh-au-btn', onClick: onClose }, '关闭 (Esc)')
+              : null
+          )
+        ),
+        h(
+          'div',
+          { className: 'dsh-au-wb-body' },
+          h(
+            'nav',
+            { className: 'dsh-au-wb-nav' },
+            navItem('fav', 'nav-fav', h(StarIcon), '常用收藏', favorites.length),
+            navItem('services', 'nav-services', h(ServicesIcon), '后台服务管理', localServices.length),
+            navItem('plugins', 'nav-plugins', h(PluginIcon), '插件管理', localDshPlugins.length),
+            privateExtensions.map((ext) => {
+              const tabKey = `ext:${ext.id}`;
+              const iconNode = ext.iconSvg
+                ? h('span', { style: { display: 'inline-flex', width: '16px', height: '16px' }, dangerouslySetInnerHTML: { __html: ext.iconSvg } })
+                : h(ExtensionIcon);
+              const badge = extRuntimesRef.current[ext.id]?.badge ?? '—';
+              return navItem(tabKey, `nav-ext-${ext.id}`, iconNode, ext.title, badge);
+            }),
+            navItem('all', 'nav-all', h(CommandMenuIcon), '全部菜单指令', totalMenuItems),
+            // 菜单分组是二级项：用同尺寸圆点占住图标槽位，标题仍与上面四个页签左对齐。
+            groups.map((g) => h(
+              'button',
+              { key: g.id, type: 'button', className: `dsh-au-wb-navbtn ${activeTab === g.id ? 'active' : ''}`, onClick: () => setActiveTab(g.id) },
+              h('span', { className: 'dsh-au-nav-main' }, [
+                h('span', { key: 'icon', className: 'dsh-au-nav-icon' }, h('span', { className: 'dsh-au-nav-dot' })),
+                h('span', { key: 'label', className: 'dsh-au-nav-label' }, g.title),
+              ]),
+              h('span', { className: 'dsh-au-nav-count' }, `${(g.items || []).length}`)
+            ))
+          ),
+          h('section', { className: 'dsh-au-wb-center' }, renderCenterContent(scope)),
+          h('aside', { className: 'dsh-au-wb-inspector' }, renderInspector(scope))
+        ),
+        h(
+          'footer',
+          { className: 'dsh-au-wb-foot' },
+          h('span', null, '支持序号直达 (11-71) · 双击无参卡片直接执行 · 后台服务独立于 DSH 运行，支持按电脑保存自启组合'),
+          h('span', null, `本机: ${wb?.selfHostname || 'DSH'} · SSOT: scripts/menu.json`)
+        )
+      );
+
+      if (embedded) return workbenchBox;
+
       return h(
         'div',
         { className: 'dsh-au-mask', onClick: (e) => { if (e.target === e.currentTarget) onClose(); } },
-        h(
-          'div',
-          { className: 'dsh-au-wb-modal', role: 'dialog', 'aria-modal': 'true' },
-          privateExtensions.map((ext) => ext.styleText ? h('style', { key: `ext-style-${ext.id}` }, ext.styleText) : null),
-          privateExtensions.map((ext) => h(PrivateExtensionRunner, {
-            key: `ext-runner-${ext.id}`,
-            ext,
-            active: activeTab === `ext:${ext.id}`,
-            parentSeq: parentExtSeqRef.current,
-            runtimesRef: extRuntimesRef,
-            onExtUpdate: triggerExtRender,
-          })),
-          h(
-            'header',
-            { className: 'dsh-au-wb-head' },
-            h('input', {
-              className: 'dsh-au-wb-search',
-              placeholder: '输入菜单序号、服务名或关键字检索...',
-              value: search,
-              // 开窗不主动聚焦，避免移动端自动弹出键盘；用户仍可点击搜索。
-              autoFocus: false,
-              onChange: (e) => {
-                const v = e.target.value;
-                setSearch(v);
-                const found = findMenuItem(v.trim());
-                if (found) setSelectedCode(found.item.code);
-              },
-            }),
-            h(
-              'div',
-              { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
-              h('button', {
-                type: 'button',
-                className: 'dsh-au-wb-pill on',
-                onClick: () => setOsOverride(isWin ? 'darwin' : 'win32'),
-                title: '自动识别当前系统；点击可切换预览 Windows / macOS 专属菜单项',
-              }, isWin ? '系统识别: Windows (.ps1)' : '系统识别: macOS (.sh)'),
-              h('button', {
-                type: 'button',
-                className: 'dsh-au-btn',
-                disabled: busySvcId === '__refresh__',
-                onClick: () => void handleManualRefresh(),
-                title: '立即重新检查后台服务运行状态（默认 1 小时自动缓存）',
-              }, busySvcId === '__refresh__' ? '刷新中…' : '刷新'),
-              h('button', { type: 'button', className: 'dsh-au-btn', onClick: onClose }, '关闭 (Esc)')
-            )
-          ),
-          h(
-            'div',
-            { className: 'dsh-au-wb-body' },
-            h(
-              'nav',
-              { className: 'dsh-au-wb-nav' },
-              navItem('fav', 'nav-fav', h(StarIcon), '常用收藏', favorites.length),
-              navItem('services', 'nav-services', h(ServicesIcon), '后台服务管理', localServices.length),
-              navItem('plugins', 'nav-plugins', h(PluginIcon), '插件管理', localDshPlugins.length),
-              privateExtensions.map((ext) => {
-                const tabKey = `ext:${ext.id}`;
-                const iconNode = ext.iconSvg
-                  ? h('span', { style: { display: 'inline-flex', width: '16px', height: '16px' }, dangerouslySetInnerHTML: { __html: ext.iconSvg } })
-                  : h(ExtensionIcon);
-                const badge = extRuntimesRef.current[ext.id]?.badge ?? '—';
-                return navItem(tabKey, `nav-ext-${ext.id}`, iconNode, ext.title, badge);
-              }),
-              navItem('all', 'nav-all', h(CommandMenuIcon), '全部菜单指令', totalMenuItems),
-              // 菜单分组是二级项：用同尺寸圆点占住图标槽位，标题仍与上面四个页签左对齐。
-              groups.map((g) => h(
-                'button',
-                { key: g.id, type: 'button', className: `dsh-au-wb-navbtn ${activeTab === g.id ? 'active' : ''}`, onClick: () => setActiveTab(g.id) },
-                h('span', { className: 'dsh-au-nav-main' }, [
-                  h('span', { key: 'icon', className: 'dsh-au-nav-icon' }, h('span', { className: 'dsh-au-nav-dot' })),
-                  h('span', { key: 'label', className: 'dsh-au-nav-label' }, g.title),
-                ]),
-                h('span', { className: 'dsh-au-nav-count' }, `${(g.items || []).length}`)
-              ))
-            ),
-            h('section', { className: 'dsh-au-wb-center' }, renderCenterContent(scope)),
-            h('aside', { className: 'dsh-au-wb-inspector' }, renderInspector(scope))
-          ),
-          h(
-            'footer',
-            { className: 'dsh-au-wb-foot' },
-            h('span', null, '支持序号直达 (11-71) · 双击无参卡片直接执行 · 后台服务独立于 DSH 运行，支持按电脑保存自启组合'),
-            h('span', null, `本机: ${wb?.selfHostname || 'DSH'} · SSOT: scripts/menu.json`)
-          )
-        )
+        workbenchBox
       );
+    }
+
+    /** 侧边栏入口打开的嵌入式主面板：复用统一工作台全部内容并铺满主区域。 */
+    function UnifiedWorkbenchPanel() {
+      return h(UnifiedWorkbenchModal, { initialTab: 'fav', embedded: true });
     }
 
 //#endregion
@@ -7626,6 +7652,73 @@ window.__ModuleLoader__.load({
      * 常驻壳层：设备栏插入中心列顶部，远程 iframe 插入 shell.overlay。
      * 两处都是 root 作用域，因此切换本机对话与其它主面板时不会卸载 iframe。
      */
+    /** 独立执行「打开设置弹窗并切换到 DSH AU 标签页」，避免被 selectPanel(null) 的 effect 清理打断。 */
+    let dshAuSettingsOpenSeq = 0;
+    function openDshAuSettingsDialog() {
+      if (typeof document === 'undefined' || typeof window === 'undefined') return;
+      const seq = ++dshAuSettingsOpenSeq;
+      const findAuTab = () => {
+        const dialogs = document.querySelectorAll('[role="dialog"]');
+        for (const dialog of dialogs) {
+          const buttons = dialog.querySelectorAll('button, [role="tab"]');
+          for (const btn of buttons) {
+            if ((btn.textContent || '').trim() === 'DSH AU') return btn;
+          }
+        }
+        return null;
+      };
+      // 账号插件接管 settings.launcher 后，点击左下角按钮会先弹出包含「设置」的菜单，需要再点一次「设置」才打开设置弹窗。
+      const findSettingsMenuItem = () => {
+        const menus = document.querySelectorAll('[role="menu"]');
+        for (const menu of menus) {
+          const items = menu.querySelectorAll('[role="menuitem"], button');
+          for (const item of items) {
+            const text = (item.textContent || '').trim();
+            if (text === '设置' || text.startsWith('设置') || text === 'Settings' || text.startsWith('Settings')) {
+              return item;
+            }
+          }
+        }
+        return null;
+      };
+      const existingTab = findAuTab();
+      if (existingTab) {
+        existingTab.click();
+        return;
+      }
+      let menuClicked = false;
+      const existingMenuItem = findSettingsMenuItem();
+      if (existingMenuItem) {
+        menuClicked = true;
+        existingMenuItem.click();
+      } else {
+        const trigger = document.querySelector('[data-slot="sidebar.settings"] button[aria-haspopup]')
+          || document.querySelector('[data-slot="sidebar.settings"] button');
+        if (trigger && typeof trigger.click === 'function') {
+          trigger.click();
+        }
+      }
+      let attempts = 0;
+      const trySelect = () => {
+        if (seq !== dshAuSettingsOpenSeq) return;
+        const tab = findAuTab();
+        if (tab) {
+          tab.click();
+          return;
+        }
+        if (!menuClicked) {
+          const menuItem = findSettingsMenuItem();
+          if (menuItem) {
+            menuClicked = true;
+            menuItem.click();
+          }
+        }
+        attempts += 1;
+        if (attempts < 40) window.setTimeout(trySelect, 16);
+      };
+      window.setTimeout(trySelect, 0);
+    }
+
     function AuFleetShell({ selectPanel, collapseSidebar, expandSidebar, toggleSidebar, usePanelInfo, openLocalSession, openBridgedLocalSession, readLocalSessionId }) {
       const doToggleSidebar = useCallback(() => {
         if (typeof toggleSidebar === 'function') {
@@ -7919,11 +8012,12 @@ window.__ModuleLoader__.load({
         };
       }, [hosts]);
 
-      // 兼容侧栏既有「Au 多机」入口：点击后回到会话主面板，常驻栏不发生重建。
-      // 点击设置、插件市场等其他主面板时，切回本机视图，避免远端舞台遮盖设置/插件面板。
+      // 点击侧边栏「DSH AU」入口时：保持当前主界面不变，打开 DSH 设置弹窗并切换到 DSH AU 标签页。
+      // 点击设置、插件市场等其他主面板时，切回本机视图，避免远端舞台遮盖主面板内容。
       useEffect(() => {
         if (activePanelId === PANEL_ID) {
           selectPanel(null);
+          openDshAuSettingsDialog();
           return;
         }
         if (activePanelId && (activeId || activeExtStage)) {
@@ -8504,7 +8598,13 @@ window.__ModuleLoader__.load({
 
       // 远程 DSH 管理总开关：关闭时不渲染设备栏、远程舞台与悬浮胶囊（放在全部 state 之后，保持 hook 顺序稳定）。
       // featuresStore 定义在设置页片段；单独加载外壳时按默认开启处理。
-      const remoteManagementEnabled = typeof useFeatures === 'function' ? useFeatures().remoteManagement !== false : true;
+      const featuresSnap = typeof useFeatures === 'function' ? useFeatures() : null;
+      const remoteManagementEnabled = featuresSnap ? featuresSnap.remoteManagement !== false : true;
+      // 本机侧边栏扩展开关：优先读 featuresStore（设置页切换即时生效），首屏未加载完时回退用 state.self.features 防闪烁。
+      const sidebarExtFlags = featuresSnap?.loaded
+        ? (featuresSnap.sidebarExtensions || {})
+        : (state.self?.features?.sidebarExtensions || {});
+      const visibleSidebarExtensions = sidebarExtensions.filter((ext) => sidebarExtFlags[ext.id] !== false);
 
       // 设置页「管理远程设备」按钮请求打开远程设备管理弹窗。
       useEffect(() => {
@@ -8517,6 +8617,13 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         if (!remoteManagementEnabled && activeId) selectLocal({ reason: 'remote-management-off' });
       }, [remoteManagementEnabled, activeId, selectLocal]);
+
+      // 关闭某个侧边栏扩展时，若当前正停留在它的主舞台，立即切回本机对话。
+      useEffect(() => {
+        if (activeExtStage && sidebarExtFlags[activeExtStage.extId] === false) {
+          selectLocal({ reason: 'sidebar-ext-off' });
+        }
+      }, [activeExtStage, sidebarExtFlags, selectLocal]);
 
       // 若已打开的远端后来确认是本机映射，立即回到本机而不是留下空白舞台。
       useEffect(() => {
@@ -8990,9 +9097,9 @@ window.__ModuleLoader__.load({
         remoteManagementEnabled && hosts && !topbarCollapsed ? ReactDOM.createPortal(topbar, hosts.topHost) : null,
         (remoteManagementEnabled || activeExtStage !== null) && hosts ? ReactDOM.createPortal(stage, hosts.stageHost) : null,
         remoteManagementEnabled && topbarCollapsed ? ReactDOM.createPortal(floatingCapsule, hosts?.stageHost || document.body) : null,
-        sidebarExtensions.length > 0
+        visibleSidebarExtensions.length > 0
           ? h(PrivateSidebarExtensionsHost, {
-              extensions: sidebarExtensions,
+              extensions: visibleSidebarExtensions,
               activeExtStage,
               activeNativeSession,
               showExtStage,
@@ -9331,7 +9438,7 @@ window.__ModuleLoader__.load({
     /** 内置功能开关存宿主机配置；新建目标限制默认关闭，不投射到其他主机。 */
     const featuresStore = {
       snapshot: {
-        todo: false, remoteManagement: true, fullAccessByDefault: false, blockGoalCreation: false, disconnectRemotesOnLock: false, goalCreationError: '',
+        todo: false, remoteManagement: true, fullAccessByDefault: false, blockGoalCreation: false, disconnectRemotesOnLock: false, sidebarWorkbench: false, sidebarExtensions: {}, sidebarExtensionCatalog: [], goalCreationError: '',
         loaded: false, busy: false, error: '',
         /** 自动续跑默认关闭，且没有规则。 */
         autoContinue: { enabled: false, retryDelaySec: 60, maxRetries: 5, compactOnDisconnect: true, continueOnTruncate: true, prompt: '继续', rules: [] },
@@ -9397,6 +9504,11 @@ window.__ModuleLoader__.load({
             fullAccessByDefault: res.features.fullAccessByDefault === true,
             blockGoalCreation: res.features.blockGoalCreation === true,
             disconnectRemotesOnLock: res.features.disconnectRemotesOnLock === true,
+            sidebarWorkbench: res.features.sidebarWorkbench === true,
+            sidebarExtensions: res.features.sidebarExtensions && typeof res.features.sidebarExtensions === 'object' && !Array.isArray(res.features.sidebarExtensions)
+              ? res.features.sidebarExtensions
+              : {},
+            sidebarExtensionCatalog: Array.isArray(res.sidebarExtensionCatalog) ? res.sidebarExtensionCatalog : [],
             goalCreationError: typeof res.goalCreationError === 'string' ? res.goalCreationError : '',
             loaded: true,
             error: '',
@@ -9458,6 +9570,40 @@ window.__ModuleLoader__.load({
         }
         publishFeatures({
           disconnectRemotesOnLock: res.features.disconnectRemotesOnLock,
+          busy: false,
+        });
+      } catch (error) {
+        publishFeatures({ busy: false, error: error?.message || '保存失败，请稍后重试' });
+      }
+    }
+
+    /** 保存侧边栏工作台入口开关；开启后在左侧边栏添加 DSH AU 入口。 */
+    async function saveSidebarWorkbenchFeature(next) {
+      publishFeatures({ busy: true, error: '' });
+      try {
+        const res = await callApi('saveFeatures', { sidebarWorkbench: Boolean(next) });
+        if (!res?.ok || typeof res.features?.sidebarWorkbench !== 'boolean') {
+          throw new Error(res?.error || '保存失败，请稍后重试');
+        }
+        publishFeatures({
+          sidebarWorkbench: res.features.sidebarWorkbench,
+          busy: false,
+        });
+      } catch (error) {
+        publishFeatures({ busy: false, error: error?.message || '保存失败，请稍后重试' });
+      }
+    }
+
+    /** 保存本机单个侧边栏私人扩展的挂载开关；仅落盘本机，不同步到其它设备。 */
+    async function saveSidebarExtensionFeature(extId, next) {
+      publishFeatures({ busy: true, error: '' });
+      try {
+        const res = await callApi('saveFeatures', { sidebarExtensions: { [extId]: Boolean(next) } });
+        if (!res?.ok || !res.features?.sidebarExtensions || typeof res.features.sidebarExtensions !== 'object') {
+          throw new Error(res?.error || '保存失败，请稍后重试');
+        }
+        publishFeatures({
+          sidebarExtensions: res.features.sidebarExtensions,
           busy: false,
         });
       } catch (error) {
@@ -11327,11 +11473,16 @@ window.__ModuleLoader__.load({
               },
             },
             '选择同步项',
-            totalDiffCount > 0
-              ? h('span', { className: 'dsh-au-cloud-sync-outer-diff' }, `${totalDiffCount} 项待同步`)
-              : null
+            cloudSync.conflict
+              ? h('span', { className: 'dsh-au-cloud-sync-outer-diff' }, '双端冲突')
+              : totalDiffCount > 0
+                ? h('span', { className: 'dsh-au-cloud-sync-outer-diff' }, `${totalDiffCount} 项待同步`)
+                : null
           ),
         }),
+        cloudSync.conflict
+          ? h('div', { className: 'dsh-au-settings-note is-warn', role: 'alert' }, cloudSync.conflictReason || '检测到本机与云端均有未同步改动，已暂停自动覆盖，请点「选择同步项」手动推送或拉取。')
+          : null,
         h(SettingsItem, {
           title: '私人同步仓库路径',
           description: '指向包含 dsh-sync 或 dsh-au/sync 的本地仓库；留空则只用插件自带的示例 sync/。',
@@ -11538,13 +11689,70 @@ window.__ModuleLoader__.load({
       );
     }
 
+    function SidebarWorkbenchFeatureGroup() {
+      const features = useFeatures();
+      const enabled = features.sidebarWorkbench === true;
+      return h(FeatureSwitchGroup, {
+        id: 'sidebar-workbench',
+        heading: '侧边栏入口',
+        title: '在侧边栏显示 DSH AU',
+        description: '打开后在左侧边栏顶部导航区添加「DSH AU」入口，点击即可打开设置弹窗并切换到 DSH AU。',
+        checked: enabled,
+        disabled: !features.loaded || features.busy,
+        onToggle: () => { void saveSidebarWorkbenchFeature(!enabled); },
+        hint: features.error || (enabled ? '已开启：左侧边栏已显示「DSH AU」入口。' : '已关闭：侧边栏不显示「DSH AU」入口。'),
+      });
+    }
+
+    /** 侧边栏私人扩展（如 GrokBot、Claude）本机独立开关组；无可用侧边栏扩展时隐藏。 */
+    function SidebarExtensionsFeatureGroup() {
+      const features = useFeatures();
+      const catalog = Array.isArray(features.sidebarExtensionCatalog) ? features.sidebarExtensionCatalog : [];
+      if (catalog.length === 0) return null;
+      const flags = features.sidebarExtensions && typeof features.sidebarExtensions === 'object'
+        ? features.sidebarExtensions
+        : {};
+      const headingId = 'dsh-au-feature-sidebar-extensions-title';
+      return h(
+        'section',
+        { className: 'dsh-au-settings-group', 'aria-labelledby': headingId },
+        h('h3', { id: headingId }, '侧边栏扩展'),
+        catalog.map((ext) => {
+          const enabled = flags[ext.id] !== false;
+          const itemTitleId = `dsh-au-feature-sidebar-ext-${ext.id}`;
+          return h(SettingsItem, {
+            key: ext.id,
+            title: `在侧边栏挂载 ${ext.title}`,
+            description: `控制本机是否在左侧边栏加载「${ext.title}」扩展（${ext.id}）。关闭后立即卸载且不再轮询，只保存在这台电脑，不会同步到其他电脑。`,
+            hint: features.error || (enabled ? '已开启：当前电脑侧边栏已挂载该扩展。' : '已关闭：当前电脑侧边栏不挂载该扩展。'),
+            control: h(
+              'button',
+              {
+                type: 'button',
+                role: 'switch',
+                className: 'dsh-au-switch',
+                'aria-checked': enabled,
+                'aria-label': `在侧边栏挂载 ${ext.title}`,
+                id: itemTitleId,
+                disabled: !features.loaded || features.busy,
+                onClick: () => { void saveSidebarExtensionFeature(ext.id, !enabled); },
+              },
+              h('span', { className: 'dsh-au-switch-knob', 'aria-hidden': 'true' })
+            ),
+          });
+        })
+      );
+    }
+
     /** 设置页按使用频率分组：日常工作台、对话权限默认展开，快捷键和同步默认收起。 */
     function AuSettingsSection() {
       return h(
         'div',
         { className: 'dsh-au-settings-page' },
-        h(SettingsCategory, { id: 'workspace', title: '工作台', hint: '远程 · 待办 · 移动端 · 窗口', defaultOpen: true },
+        h(SettingsCategory, { id: 'workspace', title: '工作台', hint: '远程 · 侧边栏 · 待办 · 移动端 · 窗口', defaultOpen: true },
           h(RemoteManagementFeatureGroup),
+          h(SidebarWorkbenchFeatureGroup),
+          h(SidebarExtensionsFeatureGroup),
           h(TodoFeatureGroup),
           h(MobileFeatureGroup),
           h(WindowMemoryFeatureGroup),
@@ -20553,14 +20761,48 @@ window.__ModuleLoader__.load({
           AuFleetShell
         )
       );
-      // 仍注册 main key 以兼容既有侧栏入口；Shell 会立即将其导航回本机对话。
+      // 注册 main key 供侧边栏「DSH AU」入口触发；Shell 收到后会立即切回对话并打开设置弹窗定位到 DSH AU。
       ctx.slots.inject('main', () =>
         ctx.slots.register(
           { name: 'main', key: PANEL_ID },
           () => h('div', { className: 'dsh-au-placeholder' })
         )
       );
-      // 设备切换由顶部常驻栏承载，避免在侧边栏重复暴露“Au 多机”入口。
+      ctx.effect(() => {
+        let disposePanelEntry = null;
+        const clearPanelEntry = () => {
+          if (typeof disposePanelEntry === 'function') {
+            disposePanelEntry();
+            disposePanelEntry = null;
+          }
+        };
+        const syncSidebarEntry = () => {
+          const enabled = featuresStore.snapshot.sidebarWorkbench === true;
+          if (enabled && !disposePanelEntry) {
+            disposePanelEntry = ctx.slots.inject('sidebar.panellist', () =>
+              ctx.slots.register(
+                {
+                  name: 'sidebar.panellist',
+                  id: PANEL_ID,
+                  order: 20,
+                  label: () => 'DSH AU',
+                },
+                SidebarWorkbenchIcon
+              )
+            );
+          } else if (!enabled && disposePanelEntry) {
+            clearPanelEntry();
+            // 关闭开关时若当前停留在工作台主面板，切回本机对话。
+            try { ctx.layout?.selectPanel?.(null); } catch {}
+          }
+        };
+        syncSidebarEntry();
+        featuresStore.listeners.add(syncSidebarEntry);
+        return () => {
+          featuresStore.listeners.delete(syncSidebarEntry);
+          clearPanelEntry();
+        };
+      }, 'dsh-au: sidebar workbench entry');
     }
     apply.remoteWorkspaces = remoteWorkspacesClient.helpers;
     apply.todo = todoClient.helpers;

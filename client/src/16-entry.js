@@ -215,14 +215,48 @@
           AuFleetShell
         )
       );
-      // 仍注册 main key 以兼容既有侧栏入口；Shell 会立即将其导航回本机对话。
+      // 注册 main key 供侧边栏「DSH AU」入口触发；Shell 收到后会立即切回对话并打开设置弹窗定位到 DSH AU。
       ctx.slots.inject('main', () =>
         ctx.slots.register(
           { name: 'main', key: PANEL_ID },
           () => h('div', { className: 'dsh-au-placeholder' })
         )
       );
-      // 设备切换由顶部常驻栏承载，避免在侧边栏重复暴露“Au 多机”入口。
+      ctx.effect(() => {
+        let disposePanelEntry = null;
+        const clearPanelEntry = () => {
+          if (typeof disposePanelEntry === 'function') {
+            disposePanelEntry();
+            disposePanelEntry = null;
+          }
+        };
+        const syncSidebarEntry = () => {
+          const enabled = featuresStore.snapshot.sidebarWorkbench === true;
+          if (enabled && !disposePanelEntry) {
+            disposePanelEntry = ctx.slots.inject('sidebar.panellist', () =>
+              ctx.slots.register(
+                {
+                  name: 'sidebar.panellist',
+                  id: PANEL_ID,
+                  order: 20,
+                  label: () => 'DSH AU',
+                },
+                SidebarWorkbenchIcon
+              )
+            );
+          } else if (!enabled && disposePanelEntry) {
+            clearPanelEntry();
+            // 关闭开关时若当前停留在工作台主面板，切回本机对话。
+            try { ctx.layout?.selectPanel?.(null); } catch {}
+          }
+        };
+        syncSidebarEntry();
+        featuresStore.listeners.add(syncSidebarEntry);
+        return () => {
+          featuresStore.listeners.delete(syncSidebarEntry);
+          clearPanelEntry();
+        };
+      }, 'dsh-au: sidebar workbench entry');
     }
     apply.remoteWorkspaces = remoteWorkspacesClient.helpers;
     apply.todo = todoClient.helpers;
