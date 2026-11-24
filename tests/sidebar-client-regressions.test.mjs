@@ -10,8 +10,10 @@ function browser(fetchImpl = async () => ({ json: async () => ({ ok: true, remot
   const listeners = new Map();
   const messages = [];
   const disposers = [];
+  const parentMessages = [];
   const win = {
     name: '', innerWidth: 1280, innerHeight: 800,
+    parent: { postMessage(data) { parentMessages.push(data); } },
     navigator: { userAgent: 'Desktop', platform: 'Win32', maxTouchPoints: 0 },
     location: { href: 'http://127.0.0.1:6534/' },
     addEventListener(type, fn) { if (!listeners.has(type)) listeners.set(type, new Set()); listeners.get(type).add(fn); },
@@ -46,8 +48,13 @@ function browser(fetchImpl = async () => ({ json: async () => ({ ok: true, remot
     throw new Error(`unexpected external dependency: ${id}`);
   });
   return {
-    helpers: client.apply.remoteWorkspaces, win, doc, frameWindow, messages,
-    mount() { client.controller({ effect(fn) { const dispose = fn(); if (typeof dispose === 'function') disposers.push(dispose); } }); },
+    helpers: client.apply.remoteWorkspaces, win, doc, frameWindow, messages, parentMessages,
+    mount(extraCtx = {}) {
+      client.controller({
+        effect(fn) { const dispose = fn(); if (typeof dispose === 'function') disposers.push(dispose); },
+        ...extraCtx,
+      });
+    },
     emit(data) { win.dispatchEvent({ type: 'message', source: frameWindow, data }); },
     dispose() { for (const fn of disposers.reverse()) fn(); },
   };
@@ -488,3 +495,104 @@ test('createNew falls back to backend createRemoteSession when controlled iframe
   assert.equal(createRequests.length, 1, 'open-failed must trigger backend createRemoteSession fallback');
   assert.equal(h.store.selectedSessionByDevice.get('mac'), 's-mac-fallback-1');
 });
+
+test('extractControlledWorkspacesSnapshot filters 0000e870- bridge sessions and skips stray fallback workspaces when registered workspaces exist', (t) => {
+  const runSnapshot = ({ currentId, rawWorkspaces, rawSessions }) => {
+    const env = browser();
+    t.after(() => env.dispose());
+    env.win.name = 'dsh-au-controlled:mac';
+    const byId = Object.fromEntries(rawSessions.map((s) => [s.id, { ...s, retainedBy: s.id === currentId ? { mainView: 1 } : { mainView: 0 } }]));
+    env.mount({
+      workspaces: { list: { getSnapshot: () => ({ items: rawWorkspaces }) } },
+      sessions: { list: { getSnapshot: () => ({ byId, items: Object.values(byId) }) } },
+    });
+    return env.parentMessages.findLast((m) => m?.type === 'dsh-au:controlled-workspaces-snapshot');
+  };
+
+  // 存在真实注册工作区时，过滤 0000e870- 会话与未归属游离会话，严禁合成 desktop 或未分组工作区
+  const withRegistered = runSnapshot({
+    currentId: 's-real-1',
+    rawWorkspaces: [{ workspaceId: 'ws-1', title: 'AuOS', path: '/Users/example/AuOS', sessionIds: ['s-real-1'] }],
+    rawSessions: [
+      { id: 's-real-1', title: '主会话', cwd: '/Users/example/AuOS', updatedAt: 100 },
+      { id: '0000e870-abc-1', title: '转接会话', cwd: '/Users/example/.dsh/profiles/desktop', updatedAt: 200 },
+      { id: 's-stray-1', title: '游离孤儿', cwd: '/Users/example/orphan-dir', updatedAt: 300 },
+    ],
+  });
+  assert.deepEqual(withRegistered.workspaces.map((w) => w.workspaceId), ['ws-1']);
+  assert.deepEqual(withRegistered.workspaces[0].sessions.map((s) => s.sessionId), ['s-real-1']);
+
+  // 即使当前主舞台打开了 0000e870- 会话，只要存在真实注册工作区且未匹配到任何工作区，也不合成 desktop 工作区
+  const currentBridgeInRegistered = runSnapshot({
+    currentId: '0000e870-abc-current',
+    rawWorkspaces: [{ workspaceId: 'ws-1', title: 'AuOS', path: '/Users/example/AuOS', sessionIds: ['s-real-1'] }],
+    rawSessions: [
+      { id: 's-real-1', title: '主会话', cwd: '/Users/example/AuOS', updatedAt: 100 },
+      { id: '0000e870-abc-current', title: '当前转接', cwd: '/Users/example/.dsh/profiles/desktop', updatedAt: 200 },
+    ],
+  });
+  assert.deepEqual(currentBridgeInRegistered.workspaces.map((w) => w.workspaceId), ['ws-1']);
+
+  // 仅当受控端无任何注册工作区（rawWorkspaces.length === 0）时才允许从常规 rawSessions 兜底创建工作区，非当前 0000e870- 仍被过滤
+  const emptyWorkspaces = runSnapshot({
+    currentId: 's-fallback-1',
+    rawWorkspaces: [],
+    rawSessions: [
+      { id: 's-fallback-1', title: '兜底会话', cwd: '/Users/example/fallback-proj', updatedAt: 100 },
+      { id: '0000e870-hidden', title: '应被过滤', cwd: '/Users/example/.dsh/profiles/desktop', updatedAt: 200 },
+    ],
+  });
+  assert.deepEqual(emptyWorkspaces.workspaces.map((w) => w.title), ['fallback-proj']);
+  assert.deepEqual(emptyWorkspaces.workspaces[0].sessions.map((s) => s.sessionId), ['s-fallback-1']);
+});
+
+test('installNativeWorkspaceBridge filters local stray and 0000e870- sessions from sessList.getSnapshot to eliminate ungrouped bucket', (t) => {
+  const env = browser();
+  t.after(() => env.dispose());
+
+  let wsSnap = {
+    phase: 'ready',
+    items: [{ workspaceId: 'local-ws-1', title: 'AuOS', path: 'D:/AuOS', sessionIds: ['s-local-1', '0000e870-in-ws'] }],
+    pinnedSessionIds: [],
+    archivedSessionIds: [],
+  };
+  let sessSnap = {
+    ids: ['s-local-1', 's-orphan-1', 's-orphan-open', '0000e870-idle', '0000e870-open'],
+    byId: {
+      's-local-1': { id: 's-local-1', title: '正常本机', updatedAt: 100, retainedBy: { mainView: 0 } },
+      's-orphan-1': { id: 's-orphan-1', title: '历史孤儿', updatedAt: 200, retainedBy: { mainView: 0 } },
+      's-orphan-open': { id: 's-orphan-open', title: '打开中的孤儿', updatedAt: 250, retainedBy: { mainView: 1 } },
+      '0000e870-idle': { id: '0000e870-idle', title: '闲置转接', updatedAt: 300, retainedBy: { mainView: 0 } },
+      '0000e870-open': { id: '0000e870-open', title: '主视图转接', updatedAt: 400, retainedBy: { mainView: 1 } },
+    },
+  };
+  const wsList = { getSnapshot: () => wsSnap, subscribe: () => () => {} };
+  const sessList = { getSnapshot: () => sessSnap, subscribe: () => () => {} };
+
+  env.mount({
+    workspaces: { list: wsList },
+    sessions: { list: sessList },
+  });
+
+  // 本机视图：保留已归属工作区会话及主视图正打开的会话；彻底过滤闲置 0000e870- 与游离孤儿会话（ids 与 byId 一致）
+  const localSnap = sessList.getSnapshot();
+  assert.deepEqual(localSnap.ids, ['s-local-1', 's-orphan-open', '0000e870-open']);
+  assert.deepEqual(Object.keys(localSnap.byId).sort(), ['0000e870-open', 's-local-1', 's-orphan-open']);
+
+  // 切换到远端设备后：所有本机未归属游离会话（含原 mainView > 0 的 0000e870-open 与 s-orphan-open）均不再视为当前主视图打开
+  env.helpers.store.activeDeviceId = 'mac';
+  const remoteActiveSnap = sessList.getSnapshot();
+  assert.deepEqual(remoteActiveSnap.ids, ['s-local-1']);
+  assert.deepEqual(Object.keys(remoteActiveSnap.byId), ['s-local-1']);
+
+  // wsList 新增归属会话且 sessSnap 引用不变时，cache 必须跟随 rawWs 失效并放行新归属会话
+  env.helpers.store.activeDeviceId = null;
+  wsSnap = {
+    ...wsSnap,
+    items: [{ workspaceId: 'local-ws-1', title: 'AuOS', path: 'D:/AuOS', sessionIds: ['s-local-1', 's-orphan-1'] }],
+  };
+  const afterWsUpdate = sessList.getSnapshot();
+  assert.equal(Object.hasOwn(afterWsUpdate.byId, 's-orphan-1'), true);
+  assert.equal(afterWsUpdate.ids.includes('s-orphan-1'), true);
+});
+

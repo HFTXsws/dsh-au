@@ -654,7 +654,7 @@
 
           const incomingSessions = (Array.isArray(rawWs.sessions) ? rawWs.sessions : []).map((s) => {
             const sessionId = String(s?.sessionId || s?.id || '').trim();
-            if (!sessionId || store.archivedSessionIds.has(sessionId)) return null;
+            if (!sessionId || /^0000e870-/i.test(sessionId) || store.archivedSessionIds.has(sessionId)) return null;
             const pinnedOverride = store.pinnedSessionOverrides.has(sessionId)
               ? store.pinnedSessionOverrides.get(sessionId)
               : Boolean(s?.pinned);
@@ -784,6 +784,19 @@
             existing.sortUpdatedAt = computeStabilizedWorkspaceSortTs(existing.sessions, existing.updatedAt);
             existing.status = computeWorkspaceAggregateStatus(existing.sessions, rawWs.status || existing.status);
           } else {
+            // 拦截非真实添加的游离合成工作区（兼容尚未更新插件的远端受控端）：
+            // 1) DSH 进程默认启动目录 .dsh/profiles/desktop（由 0000e870- 扩展桥接会话产生）；
+            // 2) 当该设备已有服务端权威工作区列表时，受控端按游离会话兜底合成的假工作区（createdAt === '' 且 ID 为路径/cwd:）。
+            if (/[\\/]\.dsh[\\/]profiles[\\/]desktop$/i.test(wsPath)) return;
+            if (
+              !fromServer
+              && bucket.length > 0
+              && rawWs.createdAt === ''
+              && (!rawId || rawId === wsPath || rawId.startsWith('cwd:'))
+              && !incomingSessions.some((s) => s.blank)
+            ) {
+              return;
+            }
             const sortedSessions = sortWsSessions(incomingSessions);
             const updatedAt = Math.max(
               Number(rawWs.updatedAt || 0),
@@ -3117,19 +3130,41 @@
         let cachedSessSnap = null;
         sessList.getSnapshot = () => {
           const rawSess = origGetSessSnapshot() || { byId: {} };
+          const rawWs = origGetWsSnapshot() || {};
           const isRemoteActive = Boolean((store.activeDeviceId && store.activeDeviceId !== 'local') || store.activeExtStage);
           const selectedSig = [...store.selectedSessionByDevice.entries()].map(([k, v]) => `${k}:${v}`).join('|');
           const extStageSig = store.activeExtStage ? `${store.activeExtStage.extId}:${store.activeExtStage.itemId}` : '';
           const cacheKey = `${store.revision}::${store.activeDeviceId || 'local'}::${extStageSig}::${selectedSig}`;
-          if (cachedSessSnap && cachedSessKey === cacheKey && cachedSessSnap.__rawSess === rawSess) {
+          if (cachedSessSnap && cachedSessKey === cacheKey && cachedSessSnap.__rawSess === rawSess && cachedSessSnap.__rawWs === rawWs) {
             return cachedSessSnap.value;
           }
 
           rebuildNativeRemoteRegistry();
+          // 从本机真实工作区（非远端原生桥接项）收集已归属的 sessionIds，并排除 0000e870- 外部转接会话
+          const rawLocalWsItems = Array.isArray(rawWs.items)
+            ? rawWs.items.filter((item) => item && !isNativeRemoteWorkspaceId(item.workspaceId))
+            : [];
+          const hasLocalRegisteredWorkspaces = rawLocalWsItems.length > 0;
+          const localAccountedSessionIds = new Set();
+          for (const ws of rawLocalWsItems) {
+            if (!Array.isArray(ws.sessionIds)) continue;
+            for (const sid of ws.sessionIds) {
+              if (typeof sid === 'string' && sid && !/^0000e870-/i.test(sid)) {
+                localAccountedSessionIds.add(sid);
+              }
+            }
+          }
+
           const rawById = (rawSess?.byId && typeof rawSess.byId === 'object') ? rawSess.byId : {};
           const nextById = {};
           for (const [sid, s] of Object.entries(rawById)) {
             if (!s) continue;
+            // 过滤本机游离会话，防止 DSH 原生 groupByWorkspace 产生「未分组」：
+            // 1) 外部扩展转接生成的 0000e870- 会话，除非是当前本机主视图正在打开的会话，否则跳过；
+            // 2) 本机存在已注册工作区时，既不在任何工作区中、又不是当前本机主视图正在打开的孤儿会话，直接跳过。
+            const isActiveMainView = !isRemoteActive && (s?.retainedBy?.mainView ?? 0) > 0;
+            if (/^0000e870-/i.test(sid) && !isActiveMainView) continue;
+            if (hasLocalRegisteredWorkspaces && !localAccountedSessionIds.has(sid) && !isActiveMainView) continue;
             // 闲置历史会话被点击打开时，DSH 底层写入 session/end-seed 会将 s.updatedAt 刷成当前时间；
             // 因此仅在会话正在运行时才 Math.max 取 updatedAt，闲置会话优先采纳真实的提问时间戳，避免点开旧会话时间变成「刚刚」并跳到顶部。
             const promptTs = Number(s?.projections?.values?.sessionListMetadata?.lastPromptAt) || Number(s.lastPromptAt) || 0;
@@ -3229,8 +3264,11 @@
             };
           }
 
+          // 对 rawSess.ids 同步只保留存在于 nextById 中的 ID，确保 ids 与 byId 完全一致，彻底清空 DSH 原生 stray 游离列表
+          const filteredLocalIds = (Array.isArray(rawSess.ids) ? rawSess.ids : Object.keys(rawById))
+            .filter((id) => Object.prototype.hasOwnProperty.call(nextById, id));
           const mergedIds = [...new Set([
-            ...(Array.isArray(rawSess.ids) ? rawSess.ids : Object.keys(rawById)),
+            ...filteredLocalIds,
             ...store.nativeSessionById.keys(),
           ])];
 
@@ -3240,7 +3278,7 @@
             byId: nextById,
           };
           cachedSessKey = cacheKey;
-          cachedSessSnap = { __rawSess: rawSess, value: nextValue };
+          cachedSessSnap = { __rawSess: rawSess, __rawWs: rawWs, value: nextValue };
           return nextValue;
         };
 

@@ -59,7 +59,7 @@ function loadClientHelpers() {
   return plugin.apply.remoteWorkspaces;
 }
 
-test('listLocalWorkspaces normalizes default-workspace, preserves empty workspaces, sorts pinned first, and groups ungrouped sessions', async () => {
+test('listLocalWorkspaces normalizes default-workspace, preserves empty workspaces, sorts pinned first, and never synthesizes extra cwd workspaces when registered workspaces exist', async () => {
   const ctx = {
     get(name) {
       if (name === 'workspaceRegistry') {
@@ -89,7 +89,7 @@ test('listLocalWorkspaces normalizes default-workspace, preserves empty workspac
           listSessions: async () => [
             { header: { id: 's-1', title: '常规会话', cwd: 'D:/Work/DemoApp', createdAt: 1000 }, updatedAt: 2000 },
             { header: { id: 's-2', title: '置顶会话', cwd: 'D:/Work/DemoApp', createdAt: 1000 }, updatedAt: 1500 },
-            { header: { id: 's-orphan', title: '游离会话', cwd: 'D:/Work/OtherApp', createdAt: 3000 }, updatedAt: 3500 },
+            { header: { id: 's-orphan', title: '游离会话', cwd: '/tmp/dsh-cursor-acp-verify-123', createdAt: 3000 }, updatedAt: 3500 },
             { header: { id: 's-archived', title: '归档会话', cwd: 'D:/Work/DemoApp', createdAt: 4000 }, updatedAt: 4000 },
           ],
           readTitleSnapshots: async (ids) => ids.map(() => ({})),
@@ -104,7 +104,8 @@ test('listLocalWorkspaces normalizes default-workspace, preserves empty workspac
   };
 
   const workspaces = await listLocalWorkspaces(ctx, statusTracker, 50);
-  assert.equal(workspaces.length, 3);
+  // 已存在注册工作区时，严格只返回注册工作区，不额外合成 cwd:... 工作区
+  assert.equal(workspaces.length, 2);
 
   const defaultWs = workspaces.find((w) => w.workspaceId === 'ws-default');
   assert.equal(defaultWs.title, '默认工作区');
@@ -116,10 +117,22 @@ test('listLocalWorkspaces normalizes default-workspace, preserves empty workspac
   assert.equal(auWs.sessions[0].pinned, true);
   assert.equal(auWs.sessions[0].status, 'busy');
 
-  const orphanWs = workspaces.find((w) => w.path === 'D:/Work/OtherApp');
-  assert.ok(orphanWs);
-  assert.equal(orphanWs.title, 'OtherApp');
-  assert.deepEqual(orphanWs.sessions.map((s) => s.sessionId), ['s-orphan']);
+  const orphanWs = workspaces.find((w) => w.path === '/tmp/dsh-cursor-acp-verify-123' || String(w.workspaceId).startsWith('cwd:'));
+  assert.equal(orphanWs, undefined);
+
+  // 仅当未提供任何注册工作区（workspaces.length === 0）时，才兜底按 cwd 合成工作区
+  const fallbackOnlyCtx = {
+    get(name) {
+      if (name === 'workspaceRegistry') {
+        return { archivedSessionIds: [], pinnedSessionIds: [], list: () => [] };
+      }
+      return ctx.get(name);
+    },
+  };
+  const fallbackWorkspaces = await listLocalWorkspaces(fallbackOnlyCtx, statusTracker, 50);
+  const synthesizedOrphan = fallbackWorkspaces.find((w) => w.workspaceId === 'cwd:/tmp/dsh-cursor-acp-verify-123');
+  assert.ok(synthesizedOrphan);
+  assert.deepEqual(synthesizedOrphan.sessions.map((s) => s.sessionId), ['s-orphan']);
 });
 
 test('synthesizeWorkspacesFromCards and registerTodoRoutes return remoteWorkspaces for both updated and legacy remote peers', async (t) => {

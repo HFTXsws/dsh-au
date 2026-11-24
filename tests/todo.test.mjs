@@ -845,4 +845,70 @@ test('offline or timed-out remote devices are skipped without double native fall
   }
 });
 
+test('collectRemoteCardsAndWorkspaces does not synthesize extra workspaces from orphan cards when remote returns non-empty workspaces, and falls back only when workspaces is empty', async () => {
+  const { registerTodoRoutes } = await import('../lib/todo/index.js');
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-au-todo-ws-align-'));
+  process.env.DSH_AU_TODO_PATH = join(dir, 'dsh-au-todo.json');
+  delete globalThis.__dshAuTodoApplyActive;
+  const harness = createRouteHarness();
+  const bridge = {
+    version: 1,
+    getLocalDevice: () => ({ deviceId: 'local-dev', name: '本机' }),
+    listLocalSessions: async () => [],
+    listLocalWorkspaces: async () => [],
+    getDevices: async () => [
+      { deviceId: 'peer-with-ws', name: 'MacBook', online: true },
+      { deviceId: 'peer-empty-ws', name: 'LegacyBox', online: true },
+    ],
+    requestDevice: async (deviceId, path) => {
+      if (deviceId === 'peer-with-ws' && path === '/dsh-au-todo/api') {
+        return {
+          ok: true,
+          cards: [
+            { sessionId: 's-match', title: '匹配已有路径', summary: 'ok', cwd: '/Users/mac/DemoApp', updatedAt: recentAt, status: 'idle' },
+            { sessionId: 's-orphan-tmp', title: '临时目录游离会话', summary: 'tmp', cwd: '/tmp/dsh-cursor-acp-verify-999', updatedAt: recentAt, status: 'busy' },
+          ],
+          workspaces: [
+            {
+              workspaceId: 'ws-real-mac',
+              title: 'DemoApp',
+              path: '/Users/mac/DemoApp',
+              updatedAt: 1000,
+              sessions: [],
+            },
+          ],
+        };
+      }
+      if (deviceId === 'peer-empty-ws' && path === '/dsh-au-todo/api') {
+        return {
+          ok: true,
+          cards: [
+            { sessionId: 's-legacy-1', title: '空工作区回退会话', summary: 'legacy', cwd: 'D:/LegacyApp', updatedAt: recentAt, status: 'idle' },
+          ],
+          workspaces: [],
+        };
+      }
+      return { ok: false, httpStatus: 404 };
+    },
+  };
+  const dispose = registerTodoRoutes({ server: harness.server, bridge, isEnabled: () => true });
+  try {
+    const res = await harness.call('getState');
+    assert.equal(res.status, 200);
+    const macWorkspaces = res.json.remoteWorkspaces.filter((w) => w.deviceId === 'peer-with-ws');
+    assert.equal(macWorkspaces.length, 1, 'must strictly return registered workspaces without synthesizing extra cwd workspaces');
+    assert.equal(macWorkspaces[0].workspaceId, 'ws-real-mac');
+    assert.deepEqual(macWorkspaces[0].sessions.map((s) => s.sessionId), ['s-match']);
+
+    const legacyWorkspaces = res.json.remoteWorkspaces.filter((w) => w.deviceId === 'peer-empty-ws');
+    assert.equal(legacyWorkspaces.length, 1, 'empty remote workspaces array should fall back to synthesizeWorkspacesFromCards');
+    assert.equal(legacyWorkspaces[0].title, 'LegacyApp');
+    assert.deepEqual(legacyWorkspaces[0].sessions.map((s) => s.sessionId), ['s-legacy-1']);
+  } finally {
+    dispose();
+    delete process.env.DSH_AU_TODO_PATH;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 

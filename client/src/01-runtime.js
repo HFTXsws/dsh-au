@@ -390,6 +390,9 @@
         const sid = row?.sessionId || row?.id;
         const isCurrentActiveBlank = Boolean(row?.blank && currentSessionId && sid === currentSessionId);
         if (typeof sid !== 'string' || !sid || row?.origin === 'subagent' || (row?.blank && !isCurrentActiveBlank) || archivedSet.has(sid)) return null;
+        // 过滤外部扩展转接生成的 DSH 原生会话（0000e870- 前缀），除非它是当前正在主舞台打开的会话，
+        // 防止其默认 cwd（~/.dsh/profiles/desktop）被提取目录名合成为「desktop」幽灵工作区。
+        if (/^(?:0000e870-)/i.test(sid) && sid !== currentSessionId) return null;
         const values = row?.projections?.values || row?.projectionValues || projectionsBySession[sid]?.values || {};
         const pickRealTitle = (val) => {
           if (typeof val !== 'string') return '';
@@ -548,6 +551,9 @@
           || (normWsTitle && byTitle.get(normWsTitle))
           || null;
         if (!target) {
+          // 当受控端已存在真实注册的工作区（rawWorkspaces.length > 0）时，未匹配到任何已注册工作区的游离会话直接跳过，
+          // 严禁按 cwd 兜底新建工作区；仅当 rawWorkspaces.length === 0 时才允许从 rawSessions 兜底创建工作区。
+          if (rawWorkspaces.length > 0) continue;
           const fallbackId = wsId || cwd || normWsTitle || 'default';
           const fallbackTitle = normWsTitle;
           target = {
