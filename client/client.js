@@ -1651,14 +1651,23 @@ window.__ModuleLoader__.load({
         const available = catalog?.models?.find((model) => model.provider === selection.provider && model.model === selection.model);
         const reasoningEfforts = available?.reasoningEfforts || [];
         const savedEffort = selection.reasoningEffort || '';
+        // 未显式保存推理强度时，默认选中 medium（若无 medium 则回退模型默认或首个档位），不再展示「默认」前缀
+        const fallbackEffortMeta = !savedEffort && reasoningEfforts.length
+          ? (reasoningEfforts.find((effort) => String(effort.id || '').toLowerCase() === 'medium')
+            || reasoningEfforts.find((effort) => effort.id === available?.reasoningDefault)
+            || reasoningEfforts[0]
+            || null)
+          : null;
         const savedEffortMeta = reasoningEfforts.find((effort) => effort.id === savedEffort);
+        const effectiveEffort = savedEffort || fallbackEffortMeta?.id || '';
         const effortAvailable = !savedEffort || Boolean(savedEffortMeta);
         const reasoningLabel = savedEffort
-          ? savedEffortMeta?.name || savedEffort
-          : available?.reasoningDefaultLabel ? `默认 ${available.reasoningDefaultLabel}` : '';
+          ? (savedEffortMeta?.name || savedEffort)
+          : (fallbackEffortMeta?.name || fallbackEffortMeta?.id || available?.reasoningDefaultLabel || '');
         return {
           number: index + 1,
           selection,
+          effectiveReasoningEffort: effectiveEffort,
           label: selection.label || available?.label || selection.model,
           providerLabel: available?.providerLabel || selection.provider,
           vendor: modelShortcutVendorTone(selection.provider, selection.model),
@@ -1667,7 +1676,11 @@ window.__ModuleLoader__.load({
           reasoningLabel,
           reasoningUnavailable: Boolean(savedEffort && !savedEffortMeta),
           available: Boolean(available && effortAvailable),
-          current: modelShortcutCurrentMatch(selection, catalog?.current, available),
+          current: modelShortcutCurrentMatch(
+            effectiveEffort && !selection.reasoningEffort ? { ...selection, reasoningEffort: effectiveEffort } : selection,
+            catalog?.current,
+            available
+          ),
         };
       }).filter(Boolean);
     }
@@ -1756,8 +1769,9 @@ window.__ModuleLoader__.load({
         const target = popup.target;
         if (!target) throw new Error('当前对话未就绪，请重新打开模型列表');
         assertModelShortcutTarget(target);
+        const effectiveEffort = selection.reasoningEffort || row.effectiveReasoningEffort || '';
         const next = { provider: selection.provider, model: selection.model,
-          ...(selection.reasoningEffort ? { reasoningEffort: selection.reasoningEffort } : {}) };
+          ...(effectiveEffort ? { reasoningEffort: effectiveEffort } : {}) };
         let result;
         if (target.frameWindow && target.remoteProtocol === 'native') {
           const visible = await probeModelShortcutFrame(target);
@@ -12254,6 +12268,19 @@ window.__ModuleLoader__.load({
       return typeof effort === 'string' ? effort : effort?.name || effort?.id || '';
     }
 
+    /** 解析模型推理强度的默认档位：优先选择 medium，若无 medium 则回退模型默认或首个可用档位。 */
+    function resolveDefaultModelShortcutEffort(efforts = [], fallbackDefault = '') {
+      const list = Array.isArray(efforts) ? efforts : [];
+      if (!list.length) return '';
+      const medium = list.find((item) => modelShortcutReasoningEffortId(item).toLowerCase() === 'medium');
+      if (medium) return modelShortcutReasoningEffortId(medium);
+      if (fallbackDefault) {
+        const matched = list.find((item) => modelShortcutReasoningEffortId(item) === fallbackDefault);
+        if (matched) return modelShortcutReasoningEffortId(matched);
+      }
+      return modelShortcutReasoningEffortId(list[0]);
+    }
+
     function isDefaultModelShortcutBinding(binding) {
       return Boolean(binding)
         && binding.code === DEFAULT_MODEL_SHORTCUT_BINDING.code
@@ -12337,6 +12364,7 @@ window.__ModuleLoader__.load({
 
       const savePatch = (patch) => persistModelShortcutPatch(patch, setSaving, setMessage);
       const unavailableCount = slots.filter((slot) => slot && !modelShortcutCatalogModel(catalog, slot)).length;
+      const hasConfiguredSlots = slots.some(Boolean);
       const bindingValidation = binding ? validateModelShortcutBinding(binding) : { ok: true, reason: '' };
       const controlsDisabled = !shortcutState.loaded || shortcutState.busy || saving;
       const statusMessage = message || shortcutState.error || catalogError
@@ -12488,8 +12516,10 @@ window.__ModuleLoader__.load({
         ];
         const groupedOptions = groupModelShortcutOptions(modelOptions, models);
         const efforts = Array.isArray(availableModel?.reasoningEfforts) ? availableModel.reasoningEfforts : [];
-        const savedEffort = slot?.reasoningEffort || '';
-        const savedEffortAvailable = !savedEffort || efforts.some((effort) => modelShortcutReasoningEffortId(effort) === savedEffort);
+        const rawSavedEffort = slot?.reasoningEffort || '';
+        const defaultEffort = resolveDefaultModelShortcutEffort(efforts, availableModel?.reasoningDefault);
+        const savedEffort = rawSavedEffort || defaultEffort;
+        const savedEffortAvailable = !rawSavedEffort || efforts.some((effort) => modelShortcutReasoningEffortId(effort) === rawSavedEffort);
         const rowBusy = Boolean(dragState?.saving);
         const vendor = slot ? modelShortcutVendorTone(slot.provider, slot.model) : undefined;
         // 预览数组已按目标位置重排，实际被拖动项现在位于 to 槽。
@@ -12538,9 +12568,16 @@ window.__ModuleLoader__.load({
                   disabled: controlsDisabled || catalogLoading || rowBusy,
                   onChange: (event) => {
                     const selected = models.find((model) => modelShortcutSelectionKey(model) === event.target.value);
-                    const nextSlot = selected
-                      ? { provider: selected.provider, model: selected.model, label: selected.label }
-                      : null;
+                    let nextSlot = null;
+                    if (selected) {
+                      const nextDefaultEffort = resolveDefaultModelShortcutEffort(selected.reasoningEfforts, selected.reasoningDefault);
+                      nextSlot = {
+                        provider: selected.provider,
+                        model: selected.model,
+                        label: selected.label,
+                        ...(nextDefaultEffort ? { reasoningEffort: nextDefaultEffort } : {}),
+                      };
+                    }
                     if (!event.target.value || selected) {
                       void savePatch({ slots: slots.map((item, itemIndex) => itemIndex === index ? nextSlot : item) });
                     }
@@ -12598,9 +12635,8 @@ window.__ModuleLoader__.load({
                       },
                     },
                     !savedEffortAvailable
-                      ? h('option', { value: savedEffort, disabled: true }, savedEffort)
+                      ? h('option', { value: rawSavedEffort, disabled: true }, rawSavedEffort)
                       : null,
-                    h('option', { value: '' }, '默认'),
                     efforts.map((effort) => {
                       const effortId = modelShortcutReasoningEffortId(effort);
                       return h('option', { key: effortId, value: effortId }, modelShortcutReasoningEffortLabel(effort));
@@ -12710,7 +12746,14 @@ window.__ModuleLoader__.load({
             catalogLoading
               ? [h('span', { key: 'dot', className: 'dsh-au-model-shortcut-pulse-dot', 'aria-hidden': 'true' }), ' 正在读取当前模型目录…']
               : `可配置 ${MODEL_SHORTCUT_SLOT_COUNT} 个位置${unavailableCount ? `；${unavailableCount} 个已有模型当前不可用` : ''}。`
-          )
+          ),
+          h('button', {
+            type: 'button',
+            className: 'dsh-au-btn dsh-au-model-shortcut-clear-all',
+            disabled: controlsDisabled || Boolean(dragState?.saving) || !hasConfiguredSlots,
+            title: hasConfiguredSlots ? '清除全部已配置的快捷模型' : '当前没有已配置的快捷模型',
+            onClick: () => void savePatch({ slots: Array.from({ length: MODEL_SHORTCUT_SLOT_COUNT }, () => null) }),
+          }, '一键清除')
         ),
         h('div', { className: 'dsh-au-model-shortcut-slots' }, rows),
         statusMessage ? h('p', { className: 'dsh-au-model-shortcut-status', 'data-tone': 'error', role: 'alert' }, statusMessage) : null,

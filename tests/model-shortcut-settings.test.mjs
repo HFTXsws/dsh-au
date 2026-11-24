@@ -267,3 +267,41 @@ test('groupModelShortcutOptions 按供应商分组并正确回退供应商名称
   assert.equal(groups[1].models.length, 1);
   assert.equal(groups[2].label, 'custom', '没有 providerLabel 时回退到 provider id');
 });
+
+test('设置页提供一键清除按钮，推理强度默认选中 medium 且不显示「默认」选项', () => {
+  const catalog = [
+    {
+      provider: 'antigravity',
+      model: 'gemini-4-hydrogen',
+      label: 'Gemini 4 Hydrogen',
+      providerLabel: '反重力',
+      reasoningDefault: 'high',
+      reasoningEfforts: [
+        { id: 'low', name: 'Low' },
+        { id: 'medium', name: 'Medium' },
+        { id: 'high', name: 'High' },
+      ],
+    },
+  ];
+  const slots = Array(9).fill(null);
+  slots[0] = {
+    provider: 'antigravity',
+    model: 'gemini-4-hydrogen',
+    label: 'Gemini 4 Hydrogen',
+  };
+  const tree = loadSettings(catalog, slots);
+  const nodes = walk(tree);
+
+  const clearAllBtn = nodes.find((node) => node.type === 'button' && node.props?.className?.includes('dsh-au-model-shortcut-clear-all'));
+  assert.ok(clearAllBtn, '应在“可配置 9 个位置”右侧渲染一键清除按钮');
+  assert.equal(textContent(clearAllBtn), '一键清除');
+  assert.equal(clearAllBtn.props.disabled, false, '有已配置槽位时一键清除按钮可用');
+
+  const effortSelect = nodes.find((node) => node.type === 'select' && node.props?.className === 'dsh-au-model-shortcut-effort-select');
+  assert.ok(effortSelect, '应渲染推理强度下拉框');
+  assert.equal(effortSelect.props.value, 'medium', '未显式保存推理强度时默认选中 medium');
+  const effortOptions = walk(effortSelect).filter((node) => node.type === 'option');
+  assert.equal(effortOptions.some((opt) => textContent(opt) === '默认' || opt.props?.value === ''), false, '下拉列表中不应再包含“默认”选项');
+  assert.deepEqual(effortOptions.map((opt) => opt.props.value), ['low', 'medium', 'high']);
+});
+

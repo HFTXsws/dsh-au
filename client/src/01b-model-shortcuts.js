@@ -256,14 +256,23 @@
         const available = catalog?.models?.find((model) => model.provider === selection.provider && model.model === selection.model);
         const reasoningEfforts = available?.reasoningEfforts || [];
         const savedEffort = selection.reasoningEffort || '';
+        // 未显式保存推理强度时，默认选中 medium（若无 medium 则回退模型默认或首个档位），不再展示「默认」前缀
+        const fallbackEffortMeta = !savedEffort && reasoningEfforts.length
+          ? (reasoningEfforts.find((effort) => String(effort.id || '').toLowerCase() === 'medium')
+            || reasoningEfforts.find((effort) => effort.id === available?.reasoningDefault)
+            || reasoningEfforts[0]
+            || null)
+          : null;
         const savedEffortMeta = reasoningEfforts.find((effort) => effort.id === savedEffort);
+        const effectiveEffort = savedEffort || fallbackEffortMeta?.id || '';
         const effortAvailable = !savedEffort || Boolean(savedEffortMeta);
         const reasoningLabel = savedEffort
-          ? savedEffortMeta?.name || savedEffort
-          : available?.reasoningDefaultLabel ? `默认 ${available.reasoningDefaultLabel}` : '';
+          ? (savedEffortMeta?.name || savedEffort)
+          : (fallbackEffortMeta?.name || fallbackEffortMeta?.id || available?.reasoningDefaultLabel || '');
         return {
           number: index + 1,
           selection,
+          effectiveReasoningEffort: effectiveEffort,
           label: selection.label || available?.label || selection.model,
           providerLabel: available?.providerLabel || selection.provider,
           vendor: modelShortcutVendorTone(selection.provider, selection.model),
@@ -272,7 +281,11 @@
           reasoningLabel,
           reasoningUnavailable: Boolean(savedEffort && !savedEffortMeta),
           available: Boolean(available && effortAvailable),
-          current: modelShortcutCurrentMatch(selection, catalog?.current, available),
+          current: modelShortcutCurrentMatch(
+            effectiveEffort && !selection.reasoningEffort ? { ...selection, reasoningEffort: effectiveEffort } : selection,
+            catalog?.current,
+            available
+          ),
         };
       }).filter(Boolean);
     }
@@ -361,8 +374,9 @@
         const target = popup.target;
         if (!target) throw new Error('当前对话未就绪，请重新打开模型列表');
         assertModelShortcutTarget(target);
+        const effectiveEffort = selection.reasoningEffort || row.effectiveReasoningEffort || '';
         const next = { provider: selection.provider, model: selection.model,
-          ...(selection.reasoningEffort ? { reasoningEffort: selection.reasoningEffort } : {}) };
+          ...(effectiveEffort ? { reasoningEffort: effectiveEffort } : {}) };
         let result;
         if (target.frameWindow && target.remoteProtocol === 'native') {
           const visible = await probeModelShortcutFrame(target);

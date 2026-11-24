@@ -60,6 +60,19 @@
       return typeof effort === 'string' ? effort : effort?.name || effort?.id || '';
     }
 
+    /** 解析模型推理强度的默认档位：优先选择 medium，若无 medium 则回退模型默认或首个可用档位。 */
+    function resolveDefaultModelShortcutEffort(efforts = [], fallbackDefault = '') {
+      const list = Array.isArray(efforts) ? efforts : [];
+      if (!list.length) return '';
+      const medium = list.find((item) => modelShortcutReasoningEffortId(item).toLowerCase() === 'medium');
+      if (medium) return modelShortcutReasoningEffortId(medium);
+      if (fallbackDefault) {
+        const matched = list.find((item) => modelShortcutReasoningEffortId(item) === fallbackDefault);
+        if (matched) return modelShortcutReasoningEffortId(matched);
+      }
+      return modelShortcutReasoningEffortId(list[0]);
+    }
+
     function isDefaultModelShortcutBinding(binding) {
       return Boolean(binding)
         && binding.code === DEFAULT_MODEL_SHORTCUT_BINDING.code
@@ -143,6 +156,7 @@
 
       const savePatch = (patch) => persistModelShortcutPatch(patch, setSaving, setMessage);
       const unavailableCount = slots.filter((slot) => slot && !modelShortcutCatalogModel(catalog, slot)).length;
+      const hasConfiguredSlots = slots.some(Boolean);
       const bindingValidation = binding ? validateModelShortcutBinding(binding) : { ok: true, reason: '' };
       const controlsDisabled = !shortcutState.loaded || shortcutState.busy || saving;
       const statusMessage = message || shortcutState.error || catalogError
@@ -294,8 +308,10 @@
         ];
         const groupedOptions = groupModelShortcutOptions(modelOptions, models);
         const efforts = Array.isArray(availableModel?.reasoningEfforts) ? availableModel.reasoningEfforts : [];
-        const savedEffort = slot?.reasoningEffort || '';
-        const savedEffortAvailable = !savedEffort || efforts.some((effort) => modelShortcutReasoningEffortId(effort) === savedEffort);
+        const rawSavedEffort = slot?.reasoningEffort || '';
+        const defaultEffort = resolveDefaultModelShortcutEffort(efforts, availableModel?.reasoningDefault);
+        const savedEffort = rawSavedEffort || defaultEffort;
+        const savedEffortAvailable = !rawSavedEffort || efforts.some((effort) => modelShortcutReasoningEffortId(effort) === rawSavedEffort);
         const rowBusy = Boolean(dragState?.saving);
         const vendor = slot ? modelShortcutVendorTone(slot.provider, slot.model) : undefined;
         // 预览数组已按目标位置重排，实际被拖动项现在位于 to 槽。
@@ -344,9 +360,16 @@
                   disabled: controlsDisabled || catalogLoading || rowBusy,
                   onChange: (event) => {
                     const selected = models.find((model) => modelShortcutSelectionKey(model) === event.target.value);
-                    const nextSlot = selected
-                      ? { provider: selected.provider, model: selected.model, label: selected.label }
-                      : null;
+                    let nextSlot = null;
+                    if (selected) {
+                      const nextDefaultEffort = resolveDefaultModelShortcutEffort(selected.reasoningEfforts, selected.reasoningDefault);
+                      nextSlot = {
+                        provider: selected.provider,
+                        model: selected.model,
+                        label: selected.label,
+                        ...(nextDefaultEffort ? { reasoningEffort: nextDefaultEffort } : {}),
+                      };
+                    }
                     if (!event.target.value || selected) {
                       void savePatch({ slots: slots.map((item, itemIndex) => itemIndex === index ? nextSlot : item) });
                     }
@@ -404,9 +427,8 @@
                       },
                     },
                     !savedEffortAvailable
-                      ? h('option', { value: savedEffort, disabled: true }, savedEffort)
+                      ? h('option', { value: rawSavedEffort, disabled: true }, rawSavedEffort)
                       : null,
-                    h('option', { value: '' }, '默认'),
                     efforts.map((effort) => {
                       const effortId = modelShortcutReasoningEffortId(effort);
                       return h('option', { key: effortId, value: effortId }, modelShortcutReasoningEffortLabel(effort));
@@ -516,7 +538,14 @@
             catalogLoading
               ? [h('span', { key: 'dot', className: 'dsh-au-model-shortcut-pulse-dot', 'aria-hidden': 'true' }), ' 正在读取当前模型目录…']
               : `可配置 ${MODEL_SHORTCUT_SLOT_COUNT} 个位置${unavailableCount ? `；${unavailableCount} 个已有模型当前不可用` : ''}。`
-          )
+          ),
+          h('button', {
+            type: 'button',
+            className: 'dsh-au-btn dsh-au-model-shortcut-clear-all',
+            disabled: controlsDisabled || Boolean(dragState?.saving) || !hasConfiguredSlots,
+            title: hasConfiguredSlots ? '清除全部已配置的快捷模型' : '当前没有已配置的快捷模型',
+            onClick: () => void savePatch({ slots: Array.from({ length: MODEL_SHORTCUT_SLOT_COUNT }, () => null) }),
+          }, '一键清除')
         ),
         h('div', { className: 'dsh-au-model-shortcut-slots' }, rows),
         statusMessage ? h('p', { className: 'dsh-au-model-shortcut-status', 'data-tone': 'error', role: 'alert' }, statusMessage) : null,
