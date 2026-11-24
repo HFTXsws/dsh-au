@@ -2657,6 +2657,16 @@ window.__ModuleLoader__.load({
         .dsh-au-cloud-sync-modal-footer-right { display:inline-flex; align-items:center; gap:8px; margin-left:auto; }
         .dsh-au-btn-primary { background:#2563eb !important; border-color:#3b82f6 !important; color:#ffffff !important; font-weight:500; }
         .dsh-au-btn-primary:hover { background:#1d4ed8 !important; border-color:#60a5fa !important; color:#ffffff !important; }
+        /* 启动自动云同步全局提示弹窗，沿用云同步弹窗深色卡片视觉 */
+        .dsh-au-startup-sync-modal { width:min(480px,92vw); }
+        .dsh-au-startup-sync-body { padding:16px 20px 18px; display:flex; flex-direction:column; gap:12px; }
+        .dsh-au-startup-sync-alert { padding:10px 12px; border-radius:8px; font-size:12.5px; line-height:1.55; white-space:pre-wrap; word-break:break-word; }
+        .dsh-au-startup-sync-alert.is-warn { color:#fde68a; background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.32); }
+        .dsh-au-startup-sync-alert.is-info { color:#bfdbfe; background:rgba(59,130,246,0.12); border:1px solid rgba(59,130,246,0.32); }
+        .dsh-au-startup-sync-plugins { margin:0; padding-left:18px; font-size:12.5px; line-height:1.6; color:var(--dsw-alias-label-secondary,#cbd5e1); }
+        .dsh-au-startup-sync-footer { display:flex; justify-content:flex-end; gap:8px; padding:12px 20px 16px; border-top:1px solid var(--dsw-alias-border-l1,#262f40); background:rgba(255,255,255,0.015); }
+        .dsh-au-startup-sync-footer .dsh-au-btn { min-height:32px; padding:6px 14px; font-size:12.5px; font-weight:500; background:var(--dsw-alias-bg-layer-2,#1f2636); color:var(--dsw-alias-label-primary,#f1f5f9); border-color:var(--dsw-alias-border-l2,rgba(255,255,255,0.14)); }
+        .dsh-au-startup-sync-footer .dsh-au-btn:hover { background:var(--dsw-alias-interactive-bg-hover-solid,#2a3347); border-color:var(--dsw-alias-state-business-primary,#60a5fa); color:#ffffff; }
         .dsh-au-shortcut-modal-body > .dsh-au-settings-group > h3,
         .dsh-au-shortcut-modal-body > .dsh-au-settings-group > .dsh-au-settings-desc,
         .dsh-au-model-shortcut-modal-body > .dsh-au-settings-group > h3 { display:none; }
@@ -9224,38 +9234,39 @@ window.__ModuleLoader__.load({
                 },
               },
                 h('div', {
-                  className: 'dsh-au-modal',
-                  style: { maxWidth: 480, width: '92vw', padding: 20 },
+                  className: 'dsh-au-cloud-sync-modal dsh-au-startup-sync-modal',
                   onClick: (event) => event.stopPropagation(),
                 },
-                  h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 } },
-                    h('h3', { style: { margin: 0, fontSize: 16, fontWeight: 600 } }, startupCloudSyncNotice.title || '云端自动同步提示'),
+                  h('div', { className: 'dsh-au-cloud-sync-modal-header' },
+                    h('h3', null, startupCloudSyncNotice.title || '云端自动同步提示'),
                     h('button', {
                       type: 'button',
-                      className: 'dsh-au-btn dsh-au-btn-ghost',
+                      className: 'dsh-au-cloud-sync-modal-close',
+                      'aria-label': '关闭',
                       disabled: cloudSyncNoticeBusy,
                       onClick: () => {
                         setDismissedCloudSyncNoticeId(startupCloudSyncNotice.id || '');
                         void callApi('dismissStartupCloudSyncNotice').catch(() => {});
                       },
-                    }, '关闭')
+                    }, '×')
                   ),
-                  h('div', {
-                    className: `dsh-au-settings-note ${startupCloudSyncNotice.status === 'upgraded_restart_required' ? 'is-info' : 'is-warn'}`,
-                    role: 'alert',
-                    style: { marginBottom: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-word' },
-                  }, startupCloudSyncNotice.message || ''),
-                  Array.isArray(startupCloudSyncNotice.plugins) && startupCloudSyncNotice.plugins.length > 0
-                    ? h('ul', { style: { margin: '0 0 12px 18px', padding: 0, fontSize: 13, opacity: 0.9 } },
-                        startupCloudSyncNotice.plugins.map((p) =>
-                          h('li', { key: p.id || p.package }, `${p.name || p.package}：${p.localVersion || '未安装'} → ${p.cloudVersion || '云端版本'}`)
+                  h('div', { className: 'dsh-au-startup-sync-body' },
+                    h('div', {
+                      className: `dsh-au-startup-sync-alert ${startupCloudSyncNotice.status === 'upgraded_restart_required' ? 'is-info' : 'is-warn'}`,
+                      role: 'alert',
+                    }, startupCloudSyncNotice.message || ''),
+                    Array.isArray(startupCloudSyncNotice.plugins) && startupCloudSyncNotice.plugins.length > 0
+                      ? h('ul', { className: 'dsh-au-startup-sync-plugins' },
+                          startupCloudSyncNotice.plugins.map((p) =>
+                            h('li', { key: p.id || p.package }, `${p.name || p.package}：${p.localVersion || '未安装'} → ${p.cloudVersion || '云端版本'}`)
+                          )
                         )
-                      )
-                    : null,
-                  cloudSyncNoticeFeedback
-                    ? h('div', { className: 'dsh-au-settings-note', style: { marginBottom: 12 } }, cloudSyncNoticeFeedback)
-                    : null,
-                  h('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: 8 } },
+                      : null,
+                    cloudSyncNoticeFeedback
+                      ? h('div', { className: 'dsh-au-startup-sync-alert is-warn' }, cloudSyncNoticeFeedback)
+                      : null
+                  ),
+                  h('div', { className: 'dsh-au-startup-sync-footer' },
                     (startupCloudSyncNotice.status === 'pull_failed' || startupCloudSyncNotice.status === 'upgrade_failed')
                       ? h('button', {
                           type: 'button',

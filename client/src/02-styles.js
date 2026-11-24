@@ -504,6 +504,16 @@
         .dsh-au-cloud-sync-modal-footer-right { display:inline-flex; align-items:center; gap:8px; margin-left:auto; }
         .dsh-au-btn-primary { background:#2563eb !important; border-color:#3b82f6 !important; color:#ffffff !important; font-weight:500; }
         .dsh-au-btn-primary:hover { background:#1d4ed8 !important; border-color:#60a5fa !important; color:#ffffff !important; }
+        /* 启动自动云同步全局提示弹窗，沿用云同步弹窗深色卡片视觉 */
+        .dsh-au-startup-sync-modal { width:min(480px,92vw); }
+        .dsh-au-startup-sync-body { padding:16px 20px 18px; display:flex; flex-direction:column; gap:12px; }
+        .dsh-au-startup-sync-alert { padding:10px 12px; border-radius:8px; font-size:12.5px; line-height:1.55; white-space:pre-wrap; word-break:break-word; }
+        .dsh-au-startup-sync-alert.is-warn { color:#fde68a; background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.32); }
+        .dsh-au-startup-sync-alert.is-info { color:#bfdbfe; background:rgba(59,130,246,0.12); border:1px solid rgba(59,130,246,0.32); }
+        .dsh-au-startup-sync-plugins { margin:0; padding-left:18px; font-size:12.5px; line-height:1.6; color:var(--dsw-alias-label-secondary,#cbd5e1); }
+        .dsh-au-startup-sync-footer { display:flex; justify-content:flex-end; gap:8px; padding:12px 20px 16px; border-top:1px solid var(--dsw-alias-border-l1,#262f40); background:rgba(255,255,255,0.015); }
+        .dsh-au-startup-sync-footer .dsh-au-btn { min-height:32px; padding:6px 14px; font-size:12.5px; font-weight:500; background:var(--dsw-alias-bg-layer-2,#1f2636); color:var(--dsw-alias-label-primary,#f1f5f9); border-color:var(--dsw-alias-border-l2,rgba(255,255,255,0.14)); }
+        .dsh-au-startup-sync-footer .dsh-au-btn:hover { background:var(--dsw-alias-interactive-bg-hover-solid,#2a3347); border-color:var(--dsw-alias-state-business-primary,#60a5fa); color:#ffffff; }
         .dsh-au-shortcut-modal-body > .dsh-au-settings-group > h3,
         .dsh-au-shortcut-modal-body > .dsh-au-settings-group > .dsh-au-settings-desc,
         .dsh-au-model-shortcut-modal-body > .dsh-au-settings-group > h3 { display:none; }

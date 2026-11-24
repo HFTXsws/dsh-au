@@ -1807,38 +1807,39 @@
                 },
               },
                 h('div', {
-                  className: 'dsh-au-modal',
-                  style: { maxWidth: 480, width: '92vw', padding: 20 },
+                  className: 'dsh-au-cloud-sync-modal dsh-au-startup-sync-modal',
                   onClick: (event) => event.stopPropagation(),
                 },
-                  h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 } },
-                    h('h3', { style: { margin: 0, fontSize: 16, fontWeight: 600 } }, startupCloudSyncNotice.title || '云端自动同步提示'),
+                  h('div', { className: 'dsh-au-cloud-sync-modal-header' },
+                    h('h3', null, startupCloudSyncNotice.title || '云端自动同步提示'),
                     h('button', {
                       type: 'button',
-                      className: 'dsh-au-btn dsh-au-btn-ghost',
+                      className: 'dsh-au-cloud-sync-modal-close',
+                      'aria-label': '关闭',
                       disabled: cloudSyncNoticeBusy,
                       onClick: () => {
                         setDismissedCloudSyncNoticeId(startupCloudSyncNotice.id || '');
                         void callApi('dismissStartupCloudSyncNotice').catch(() => {});
                       },
-                    }, '关闭')
+                    }, '×')
                   ),
-                  h('div', {
-                    className: `dsh-au-settings-note ${startupCloudSyncNotice.status === 'upgraded_restart_required' ? 'is-info' : 'is-warn'}`,
-                    role: 'alert',
-                    style: { marginBottom: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-word' },
-                  }, startupCloudSyncNotice.message || ''),
-                  Array.isArray(startupCloudSyncNotice.plugins) && startupCloudSyncNotice.plugins.length > 0
-                    ? h('ul', { style: { margin: '0 0 12px 18px', padding: 0, fontSize: 13, opacity: 0.9 } },
-                        startupCloudSyncNotice.plugins.map((p) =>
-                          h('li', { key: p.id || p.package }, `${p.name || p.package}：${p.localVersion || '未安装'} → ${p.cloudVersion || '云端版本'}`)
+                  h('div', { className: 'dsh-au-startup-sync-body' },
+                    h('div', {
+                      className: `dsh-au-startup-sync-alert ${startupCloudSyncNotice.status === 'upgraded_restart_required' ? 'is-info' : 'is-warn'}`,
+                      role: 'alert',
+                    }, startupCloudSyncNotice.message || ''),
+                    Array.isArray(startupCloudSyncNotice.plugins) && startupCloudSyncNotice.plugins.length > 0
+                      ? h('ul', { className: 'dsh-au-startup-sync-plugins' },
+                          startupCloudSyncNotice.plugins.map((p) =>
+                            h('li', { key: p.id || p.package }, `${p.name || p.package}：${p.localVersion || '未安装'} → ${p.cloudVersion || '云端版本'}`)
+                          )
                         )
-                      )
-                    : null,
-                  cloudSyncNoticeFeedback
-                    ? h('div', { className: 'dsh-au-settings-note', style: { marginBottom: 12 } }, cloudSyncNoticeFeedback)
-                    : null,
-                  h('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: 8 } },
+                      : null,
+                    cloudSyncNoticeFeedback
+                      ? h('div', { className: 'dsh-au-startup-sync-alert is-warn' }, cloudSyncNoticeFeedback)
+                      : null
+                  ),
+                  h('div', { className: 'dsh-au-startup-sync-footer' },
                     (startupCloudSyncNotice.status === 'pull_failed' || startupCloudSyncNotice.status === 'upgrade_failed')
                       ? h('button', {
                           type: 'button',
