@@ -10,6 +10,24 @@
     }
     // END resolveDisconnectRemotesOnLock
 
+    // 回环地址判定：空字符串、localhost、127.0.0.1、::1、[::1]（忽略大小写和首尾空格）判定为本机回环地址
+    function isLoopbackHostname(hostname) {
+      const host = typeof hostname === 'string' ? hostname.trim().toLowerCase() : '';
+      if (!host) return true;
+      return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+    }
+    // END isLoopbackHostname
+
+    // 悬浮胶囊 IP 协议角标计算：仅在窄屏/手机端且非本机回环访问时，根据后端 clientIpVersion 决定返回 '4' | '6' | ''
+    function resolveFloatingCapsuleIpBadge({ compactMobile, hostname, clientIpVersion } = {}) {
+      if (!compactMobile) return '';
+      if (isLoopbackHostname(hostname)) return '';
+      const version = typeof clientIpVersion === 'string' ? clientIpVersion.trim() : '';
+      if (version === '4' || version === '6') return version;
+      return '';
+    }
+    // END resolveFloatingCapsuleIpBadge
+
     function planScreenLockRemoteFrames({
       enabled,
       wasEnabled,
@@ -346,7 +364,7 @@
       toggleSidebarRef.current = doToggleSidebar;
       const selectPanelRef = useRef(selectPanel);
       selectPanelRef.current = selectPanel;
-      const [state, setState] = useState({ self: null, devices: [], lanPeers: [], remotes: [] });
+      const [state, setState] = useState({ self: null, devices: [], lanPeers: [], remotes: [], clientIpVersion: '' });
       const [activeId, setActiveId] = useState(null);
       const [openedIds, setOpenedIds] = useState([]);
       // 首次选中时锁定已选通路；后续探测更新不能让正在保活的 iframe 自动跳转重载。
@@ -1620,14 +1638,24 @@
             ]
       );
 
+      // 仅在移动端/窄屏且非本机回环访问时，在悬浮胶囊右上角显示 IPv6/IPv4 角标
+      const currentHostname = typeof window !== 'undefined' ? window.location?.hostname || '' : '';
+      const ipBadge = resolveFloatingCapsuleIpBadge({
+        compactMobile,
+        hostname: currentHostname,
+        clientIpVersion: state.clientIpVersion,
+      });
+
       const floatingCapsule = h(
         'button',
         {
           type: 'button',
           className: 'dsh-au-floating-capsule dsh-au-status-capsule',
           style: floatingCapsuleStyle,
-          title: '拖动以移动；单击展开设备栏',
-          'aria-label': `${statusItems.length} 台设备状态，拖动以移动，单击展开设备栏`,
+          title: ipBadge ? `拖动以移动；单击展开设备栏（IPv${ipBadge} 连接）` : '拖动以移动；单击展开设备栏',
+          'aria-label': ipBadge
+            ? `${statusItems.length} 台设备状态，IPv${ipBadge} 连接，拖动以移动，单击展开设备栏`
+            : `${statusItems.length} 台设备状态，拖动以移动，单击展开设备栏`,
           onPointerDown: startCapsuleDrag,
           onPointerMove: moveCapsuleDrag,
           onPointerUp: endCapsuleDrag,
@@ -1649,7 +1677,10 @@
             { key: item.id, className: 'dsh-au-status-point', title: `${item.name}：${item.status === 'preloading' ? '预加载中' : item.status}${item.status === 'busy' || item.status === 'waiting' ? `（${item.runningCount} 个任务）` : ''}` },
             h('span', { className: `dsh-au-dot ${item.status}` })
           ))
-        )
+        ),
+        ipBadge
+          ? h('span', { className: `dsh-au-ip-badge is-v${ipBadge}`, 'aria-hidden': true }, ipBadge)
+          : null
       );
 
       const stage = h(

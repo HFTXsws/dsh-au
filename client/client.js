@@ -2181,6 +2181,10 @@ window.__ModuleLoader__.load({
         .dsh-au-floating-capsule[data-dragging] { cursor:grabbing; }
         .dsh-au-floating-capsule[data-dragging] .dsh-au-status-capsule { cursor:grabbing; }
         .dsh-au-floating-capsule .dsh-au-status-capsule { box-shadow:0 1px 0 rgba(255,255,255,.04) inset; }
+        /* 手机端悬浮胶囊右上角 IP 协议角标（IPv6 / IPv4） */
+        .dsh-au-ip-badge { position:absolute; top:-5px; right:-4px; pointer-events:none; user-select:none; min-width:14px; height:14px; padding:0 3px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; font-size:9px; font-weight:700; line-height:1; box-sizing:border-box; box-shadow:0 1px 3px rgba(0,0,0,.35); }
+        .dsh-au-ip-badge.is-v6 { background:#0f2922; color:#34d399; border:1px solid rgba(52,211,153,.55); }
+        .dsh-au-ip-badge.is-v4 { background:#2b2110; color:#fbbf24; border:1px solid rgba(251,191,36,.55); }
         .dsh-au-tab { display:inline-flex; align-items:center; gap:7px; min-height:32px; padding:4px 12px; border-radius:8px; border:1px solid var(--dsw-alias-border-l2,#252b3b); background:var(--dsw-alias-bg-layer-1,#181c27); color:var(--dsw-alias-label-secondary,#9ca3af); cursor:pointer; white-space:nowrap; user-select:none; transition:color .15s, border-color .15s, background .15s, box-shadow .15s; -webkit-app-region:no-drag; }
         /* 复用宿主主题：浅色用浅底深字，选中仍保留蓝色身份，不改变设备标签布局。 */
         .dsh-au-tab:hover { color:var(--dsw-alias-label-primary,#fff); border-color:var(--dsw-alias-state-business-primary,#3b82f6); background:var(--dsw-alias-interactive-bg-hover-solid,#1c2230); }
@@ -7423,6 +7427,24 @@ window.__ModuleLoader__.load({
     }
     // END resolveDisconnectRemotesOnLock
 
+    // 回环地址判定：空字符串、localhost、127.0.0.1、::1、[::1]（忽略大小写和首尾空格）判定为本机回环地址
+    function isLoopbackHostname(hostname) {
+      const host = typeof hostname === 'string' ? hostname.trim().toLowerCase() : '';
+      if (!host) return true;
+      return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+    }
+    // END isLoopbackHostname
+
+    // 悬浮胶囊 IP 协议角标计算：仅在窄屏/手机端且非本机回环访问时，根据后端 clientIpVersion 决定返回 '4' | '6' | ''
+    function resolveFloatingCapsuleIpBadge({ compactMobile, hostname, clientIpVersion } = {}) {
+      if (!compactMobile) return '';
+      if (isLoopbackHostname(hostname)) return '';
+      const version = typeof clientIpVersion === 'string' ? clientIpVersion.trim() : '';
+      if (version === '4' || version === '6') return version;
+      return '';
+    }
+    // END resolveFloatingCapsuleIpBadge
+
     function planScreenLockRemoteFrames({
       enabled,
       wasEnabled,
@@ -7759,7 +7781,7 @@ window.__ModuleLoader__.load({
       toggleSidebarRef.current = doToggleSidebar;
       const selectPanelRef = useRef(selectPanel);
       selectPanelRef.current = selectPanel;
-      const [state, setState] = useState({ self: null, devices: [], lanPeers: [], remotes: [] });
+      const [state, setState] = useState({ self: null, devices: [], lanPeers: [], remotes: [], clientIpVersion: '' });
       const [activeId, setActiveId] = useState(null);
       const [openedIds, setOpenedIds] = useState([]);
       // 首次选中时锁定已选通路；后续探测更新不能让正在保活的 iframe 自动跳转重载。
@@ -9033,14 +9055,24 @@ window.__ModuleLoader__.load({
             ]
       );
 
+      // 仅在移动端/窄屏且非本机回环访问时，在悬浮胶囊右上角显示 IPv6/IPv4 角标
+      const currentHostname = typeof window !== 'undefined' ? window.location?.hostname || '' : '';
+      const ipBadge = resolveFloatingCapsuleIpBadge({
+        compactMobile,
+        hostname: currentHostname,
+        clientIpVersion: state.clientIpVersion,
+      });
+
       const floatingCapsule = h(
         'button',
         {
           type: 'button',
           className: 'dsh-au-floating-capsule dsh-au-status-capsule',
           style: floatingCapsuleStyle,
-          title: '拖动以移动；单击展开设备栏',
-          'aria-label': `${statusItems.length} 台设备状态，拖动以移动，单击展开设备栏`,
+          title: ipBadge ? `拖动以移动；单击展开设备栏（IPv${ipBadge} 连接）` : '拖动以移动；单击展开设备栏',
+          'aria-label': ipBadge
+            ? `${statusItems.length} 台设备状态，IPv${ipBadge} 连接，拖动以移动，单击展开设备栏`
+            : `${statusItems.length} 台设备状态，拖动以移动，单击展开设备栏`,
           onPointerDown: startCapsuleDrag,
           onPointerMove: moveCapsuleDrag,
           onPointerUp: endCapsuleDrag,
@@ -9062,7 +9094,10 @@ window.__ModuleLoader__.load({
             { key: item.id, className: 'dsh-au-status-point', title: `${item.name}：${item.status === 'preloading' ? '预加载中' : item.status}${item.status === 'busy' || item.status === 'waiting' ? `（${item.runningCount} 个任务）` : ''}` },
             h('span', { className: `dsh-au-dot ${item.status}` })
           ))
-        )
+        ),
+        ipBadge
+          ? h('span', { className: `dsh-au-ip-badge is-v${ipBadge}`, 'aria-hidden': true }, ipBadge)
+          : null
       );
 
       const stage = h(

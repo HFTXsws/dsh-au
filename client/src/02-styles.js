@@ -28,6 +28,10 @@
         .dsh-au-floating-capsule[data-dragging] { cursor:grabbing; }
         .dsh-au-floating-capsule[data-dragging] .dsh-au-status-capsule { cursor:grabbing; }
         .dsh-au-floating-capsule .dsh-au-status-capsule { box-shadow:0 1px 0 rgba(255,255,255,.04) inset; }
+        /* 手机端悬浮胶囊右上角 IP 协议角标（IPv6 / IPv4） */
+        .dsh-au-ip-badge { position:absolute; top:-5px; right:-4px; pointer-events:none; user-select:none; min-width:14px; height:14px; padding:0 3px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; font-size:9px; font-weight:700; line-height:1; box-sizing:border-box; box-shadow:0 1px 3px rgba(0,0,0,.35); }
+        .dsh-au-ip-badge.is-v6 { background:#0f2922; color:#34d399; border:1px solid rgba(52,211,153,.55); }
+        .dsh-au-ip-badge.is-v4 { background:#2b2110; color:#fbbf24; border:1px solid rgba(251,191,36,.55); }
         .dsh-au-tab { display:inline-flex; align-items:center; gap:7px; min-height:32px; padding:4px 12px; border-radius:8px; border:1px solid var(--dsw-alias-border-l2,#252b3b); background:var(--dsw-alias-bg-layer-1,#181c27); color:var(--dsw-alias-label-secondary,#9ca3af); cursor:pointer; white-space:nowrap; user-select:none; transition:color .15s, border-color .15s, background .15s, box-shadow .15s; -webkit-app-region:no-drag; }
         /* 复用宿主主题：浅色用浅底深字，选中仍保留蓝色身份，不改变设备标签布局。 */
         .dsh-au-tab:hover { color:var(--dsw-alias-label-primary,#fff); border-color:var(--dsw-alias-state-business-primary,#3b82f6); background:var(--dsw-alias-interactive-bg-hover-solid,#1c2230); }
