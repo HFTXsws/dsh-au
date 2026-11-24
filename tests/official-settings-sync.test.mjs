@@ -16,6 +16,7 @@ import {
   computeLocalOfficialSettingsHash,
   computeOfficialSettingsHash,
   decideStartupOfficialSyncAction,
+  findOutdatedCloudPlugins,
   getSelectableDshProfiles,
   loadDshProfilesManifest,
   normalizeCloudSyncConfig,
@@ -33,7 +34,7 @@ import {
   upsertCloudPlugin,
 } from '../lib/cloud-manifest.js';
 import { writePluginBundle } from '../lib/plugin-bundles.js';
-import { copyRestoreMock, useTempSyncRepo } from './helpers/temp-sync-repo.mjs';
+import { copyRestoreMock, makeTempSyncRepo, useTempSyncRepo } from './helpers/temp-sync-repo.mjs';
 
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -1012,4 +1013,75 @@ test('loadDshProfilesManifest：支持私有仓自定义方案名、任意模板
   assert.match(readFileSync(path.join(customTplDir, 'office-only.yaml'), 'utf8'), /model: new-office/);
   assert.match(readFileSync(path.join(customTplDir, 'legacy.yaml'), 'utf8'), /fontSize: 18/);
 });
+
+test('findOutdatedCloudPlugins 能识别版本落后于云端的托管插件与普通云插件，且前端包含启动弹窗提示', (t) => {
+  const { root: syncRepoRoot, syncDir } = makeTempSyncRepo('dsh-outdated-plugins-');
+  const dshHome = mkdtempSync(path.join(tmpdir(), 'dsh-outdated-home-'));
+  const prevManifestEnv = process.env.DSH_AU_CLOUD_MANIFEST_PATH;
+  t.after(() => {
+    if (prevManifestEnv === undefined) delete process.env.DSH_AU_CLOUD_MANIFEST_PATH;
+    else process.env.DSH_AU_CLOUD_MANIFEST_PATH = prevManifestEnv;
+    rmSync(syncRepoRoot, { recursive: true, force: true });
+    rmSync(dshHome, { recursive: true, force: true });
+  });
+
+  const manifestPath = path.join(syncDir, 'cloud', 'manifest.cloud.json');
+  mkdirSync(path.dirname(manifestPath), { recursive: true });
+  process.env.DSH_AU_CLOUD_MANIFEST_PATH = manifestPath;
+  writeFileSync(manifestPath, JSON.stringify({
+    schemaVersion: 1,
+    plugins: {
+      'zaimokuza-dsh-acp-adapter': {
+        name: 'Cursor ACP 适配器',
+        package: '@zaimokuza/dsh-acp-adapter',
+        source: 'npm',
+        version: '0.2.2-rc.5.3',
+        activation: 'profile-managed',
+        requiresDshProfile: 'general',
+      },
+      'demo-normal-plugin': {
+        name: 'Demo 插件',
+        package: 'demo-normal-plugin',
+        source: 'npm',
+        version: '1.2.0',
+      },
+    },
+  }, null, 2));
+
+  const desktopDir = path.join(dshHome, 'profiles', 'desktop');
+  mkdirSync(path.join(desktopDir, 'node_modules', '@zaimokuza', 'dsh-acp-adapter'), { recursive: true });
+  mkdirSync(path.join(desktopDir, 'node_modules', 'demo-normal-plugin'), { recursive: true });
+  writeFileSync(path.join(desktopDir, 'package.json'), JSON.stringify({
+    dependencies: {
+      '@zaimokuza/dsh-acp-adapter': '0.2.2-rc.3.1',
+      'demo-normal-plugin': '1.2.0',
+    },
+    dsh: { profile: { bundles: ['@zaimokuza/dsh-acp-adapter', 'demo-normal-plugin'] } },
+  }, null, 2));
+  writeFileSync(path.join(desktopDir, 'node_modules', '@zaimokuza', 'dsh-acp-adapter', 'package.json'), JSON.stringify({
+    name: '@zaimokuza/dsh-acp-adapter',
+    version: '0.2.2-rc.3.1',
+  }));
+  writeFileSync(path.join(desktopDir, 'node_modules', 'demo-normal-plugin', 'package.json'), JSON.stringify({
+    name: 'demo-normal-plugin',
+    version: '1.2.0',
+  }));
+
+  const outdated = findOutdatedCloudPlugins({
+    repoRoot: syncRepoRoot,
+    dshHome,
+    selectedPlugins: ['zaimokuza-dsh-acp-adapter', 'demo-normal-plugin'],
+    profile: 'general',
+  });
+  assert.equal(outdated.length, 1);
+  assert.equal(outdated[0].id, 'zaimokuza-dsh-acp-adapter');
+  assert.equal(outdated[0].localVersion, '0.2.2-rc.3.1');
+  assert.equal(outdated[0].cloudVersion, '0.2.2-rc.5.3');
+  assert.equal(outdated[0].profileManaged, true);
+
+  const client = readFileSync(new URL('../client/client.js', import.meta.url), 'utf8');
+  assert.match(client, /startupCloudSyncNotice/);
+  assert.match(client, /dismissStartupCloudSyncNotice/);
+});
+
 

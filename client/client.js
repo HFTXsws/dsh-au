@@ -7873,6 +7873,11 @@ window.__ModuleLoader__.load({
       }, []);
       // 复用桌面工具栏作为手机端纵向展开区，不维护第二套操作入口。
       const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
+      // 启动自动云同步的全局弹窗状态；追加在所有既有 useState 之后，保持旧 Hook 索引稳定。
+      const [startupCloudSyncNotice, setStartupCloudSyncNotice] = useState(null);
+      const [dismissedCloudSyncNoticeId, setDismissedCloudSyncNoticeId] = useState('');
+      const [cloudSyncNoticeBusy, setCloudSyncNoticeBusy] = useState(false);
+      const [cloudSyncNoticeFeedback, setCloudSyncNoticeFeedback] = useState('');
       const mobileToolsButtonRef = useRef(null);
       useEffect(() => {
         if (topbarCollapsed || !compactMobile) setMobileToolsOpen(false);
@@ -7891,7 +7896,15 @@ window.__ModuleLoader__.load({
           setSidebarExtensions((prev) => (prev.length === 0 && sbExts.length === 0 ? prev : sbExts));
         }
         const nextDeviceIds = new Set((snap.devices || []).map((device) => device.id));
-        setState({ self: snap.self, devices: snap.devices || [], lanPeers: snap.lanPeers || [], remotes: snap.remotes || [] });
+        setStartupCloudSyncNotice(snap.startupCloudSyncNotice || null);
+        setState({
+          self: snap.self,
+          devices: snap.devices || [],
+          lanPeers: snap.lanPeers || [],
+          remotes: snap.remotes || [],
+          // 保存服务端返回的客户端 IP 协议版本（'6' | '4' | ''）
+          clientIpVersion: typeof snap.clientIpVersion === 'string' ? snap.clientIpVersion : '',
+        });
         // 默认留在本机；若手动设备被删除才回到本机对话。
         setActiveId((current) => {
           if (!current || nextDeviceIds.has(current)) return current;
@@ -9157,7 +9170,96 @@ window.__ModuleLoader__.load({
           onAddDevice: () => { setRemoteManager(false); setEditingDevice({}); },
           onAddRoute: (device) => { setRemoteManager(false); setEditingRemote({ deviceId: device.id }); },
           onSetLocal: handleSetLocalDevice,
-        }), document.body) : null,        workbenchTab ? ReactDOM.createPortal(h(UnifiedWorkbenchModal, { initialTab: workbenchTab, onClose: () => setWorkbenchTab(null) }), document.body) : null
+        }), document.body) : null,
+        workbenchTab ? ReactDOM.createPortal(h(UnifiedWorkbenchModal, { initialTab: workbenchTab, onClose: () => setWorkbenchTab(null) }), document.body) : null,
+        startupCloudSyncNotice
+          && startupCloudSyncNotice.id !== dismissedCloudSyncNoticeId
+          && startupCloudSyncNotice.status !== 'upgrading'
+          ? ReactDOM.createPortal(
+              h('div', {
+                className: 'dsh-au-modal-mask dsh-au-modal-mask-above',
+                role: 'dialog',
+                'aria-modal': 'true',
+                'aria-label': startupCloudSyncNotice.title || '云端自动同步提示',
+                onClick: (event) => {
+                  if (event.target === event.currentTarget && !cloudSyncNoticeBusy) {
+                    setDismissedCloudSyncNoticeId(startupCloudSyncNotice.id || '');
+                    void callApi('dismissStartupCloudSyncNotice').catch(() => {});
+                  }
+                },
+              },
+                h('div', {
+                  className: 'dsh-au-modal',
+                  style: { maxWidth: 480, width: '92vw', padding: 20 },
+                  onClick: (event) => event.stopPropagation(),
+                },
+                  h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 } },
+                    h('h3', { style: { margin: 0, fontSize: 16, fontWeight: 600 } }, startupCloudSyncNotice.title || '云端自动同步提示'),
+                    h('button', {
+                      type: 'button',
+                      className: 'dsh-au-btn dsh-au-btn-ghost',
+                      disabled: cloudSyncNoticeBusy,
+                      onClick: () => {
+                        setDismissedCloudSyncNoticeId(startupCloudSyncNotice.id || '');
+                        void callApi('dismissStartupCloudSyncNotice').catch(() => {});
+                      },
+                    }, '关闭')
+                  ),
+                  h('div', {
+                    className: `dsh-au-settings-note ${startupCloudSyncNotice.status === 'upgraded_restart_required' ? 'is-info' : 'is-warn'}`,
+                    role: 'alert',
+                    style: { marginBottom: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-word' },
+                  }, startupCloudSyncNotice.message || ''),
+                  Array.isArray(startupCloudSyncNotice.plugins) && startupCloudSyncNotice.plugins.length > 0
+                    ? h('ul', { style: { margin: '0 0 12px 18px', padding: 0, fontSize: 13, opacity: 0.9 } },
+                        startupCloudSyncNotice.plugins.map((p) =>
+                          h('li', { key: p.id || p.package }, `${p.name || p.package}：${p.localVersion || '未安装'} → ${p.cloudVersion || '云端版本'}`)
+                        )
+                      )
+                    : null,
+                  cloudSyncNoticeFeedback
+                    ? h('div', { className: 'dsh-au-settings-note', style: { marginBottom: 12 } }, cloudSyncNoticeFeedback)
+                    : null,
+                  h('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: 8 } },
+                    (startupCloudSyncNotice.status === 'pull_failed' || startupCloudSyncNotice.status === 'upgrade_failed')
+                      ? h('button', {
+                          type: 'button',
+                          className: 'dsh-au-btn dsh-au-btn-primary',
+                          disabled: cloudSyncNoticeBusy,
+                          onClick: async () => {
+                            setCloudSyncNoticeBusy(true);
+                            setCloudSyncNoticeFeedback('');
+                            try {
+                              const res = await callApi('runCloudSyncNow', {});
+                              if (res?.ok) {
+                                setStartupCloudSyncNotice(null);
+                                setDismissedCloudSyncNoticeId('');
+                              } else {
+                                setCloudSyncNoticeFeedback(res?.error || '重试同步失败');
+                              }
+                            } catch (err) {
+                              setCloudSyncNoticeFeedback(err?.message || '重试同步失败');
+                            } finally {
+                              setCloudSyncNoticeBusy(false);
+                            }
+                          },
+                        }, cloudSyncNoticeBusy ? '正在同步...' : '立即从云同步')
+                      : null,
+                    h('button', {
+                      type: 'button',
+                      className: 'dsh-au-btn',
+                      disabled: cloudSyncNoticeBusy,
+                      onClick: () => {
+                        setDismissedCloudSyncNoticeId(startupCloudSyncNotice.id || '');
+                        void callApi('dismissStartupCloudSyncNotice').catch(() => {});
+                      },
+                    }, '我知道了')
+                  )
+                )
+              ),
+              document.body
+            )
+          : null
       );
     }
 
