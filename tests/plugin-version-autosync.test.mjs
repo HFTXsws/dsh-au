@@ -133,3 +133,25 @@ test('没有勾选同步的插件不推版本', (t) => {
   assert.deepEqual(result.updated, []);
   assert.equal(JSON.parse(readFileSync(path.join(pluginDir, 'plugin.json'), 'utf8')).version, '0.4.1');
 });
+
+test('本地仓库来源（local / local-repo）的插件不自动推版本上云', (t) => {
+  const { repo, dshHome } = setup(t);
+  const pluginDir = writeCloudPlugin(repo, '0.4.1');
+  const manifestPath = path.join(repo.syncDir, 'cloud', 'manifest.cloud.json');
+  const cloud = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  cloud.plugins[PLUGIN_ID].source = 'local';
+  writeFileSync(manifestPath, `${JSON.stringify(cloud, null, 2)}\n`);
+  const snapshotPath = path.join(pluginDir, 'plugin.json');
+  const snapshot = JSON.parse(readFileSync(snapshotPath, 'utf8'));
+  snapshot.source = { type: 'local-repo', ref: '0.4.1' };
+  writeFileSync(snapshotPath, `${JSON.stringify(snapshot, null, 2)}\n`);
+  writeInstalledPlugin(dshHome, '0.5.0');
+
+  const result = pushNewerInstalledPluginVersions({
+    repoRoot: repo.root,
+    dshHome,
+    selectedPlugins: [PLUGIN_ID],
+  });
+  assert.deepEqual(result.updated, []);
+  assert.equal(JSON.parse(readFileSync(snapshotPath, 'utf8')).version, '0.4.1');
+});
