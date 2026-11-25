@@ -1127,12 +1127,15 @@
               ? h('span', { className: 'dsh-au-cloud-sync-row-hint' }, item.groupNote || '与 Cursor ACP 适配器、默认模型一起同步')
               : null
           ),
-          inSync
-            ? h('span', { className: 'dsh-au-cloud-sync-row-status' }, '与云一致')
-            : h('span', {
-                className: 'dsh-au-cloud-sync-row-status is-diff',
-                title: Array.isArray(item.diffDetails) && item.diffDetails.length > 0 ? `差异区块：${item.diffDetails.join('、')}` : undefined,
-              }, `与云 ${diffN} 处不同`),
+          // 未勾选参与同步的官方设置不显示差异角标与警示样式，避免干扰判断
+          checked
+            ? (inSync
+                ? h('span', { className: 'dsh-au-cloud-sync-row-status' }, '与云一致')
+                : h('span', {
+                    className: 'dsh-au-cloud-sync-row-status is-diff',
+                    title: Array.isArray(item.diffDetails) && item.diffDetails.length > 0 ? `差异区块：${item.diffDetails.join('、')}` : undefined,
+                  }, `与云 ${diffN} 处不同`))
+            : null,
           h('span', { className: 'dsh-au-cloud-sync-row-chevron', 'aria-hidden': 'true' }, '▾')
         ),
         expanded
@@ -1287,6 +1290,7 @@
       // dsh-au 固定参与同步，单独放在「dsh-au 设置」页签；「其它云插件」页签不再列出它。
       const dshAuPluginItem = allPluginList.find(item => item.id === FIXED_SYNC_PLUGIN_ID) || null;
       const otherPluginList = allPluginList.filter(item => item.id !== FIXED_SYNC_PLUGIN_ID);
+      const isOfficialTab = activeTab === 'official';
       const isPluginTab = activeTab === 'plugins';
       const isDshAuTab = activeTab === 'dshau';
       const activeList = isPluginTab ? otherPluginList : [];
@@ -1336,12 +1340,17 @@
         .map(item => item.id);
       const preferenceList = preferenceItems && preferenceItems.length > 0 ? preferenceItems : FALLBACK_PREFERENCE_ITEMS;
       const currentSelectedPreferences = preferenceList.filter(item => preferenceMap[item.id]).map(item => item.id);
-      const prefDiffItems = preferenceList.filter(item => item.inSync === false);
-      const officialDiffItems = allList.filter(item => item.inSync === false);
-      const pluginDiffItems = allPluginList.filter(item => item.inSync === false);
+      // 仅统计已勾选参与同步的项（含固定同步的 dsh-au），未勾选的差异不计入角标与顶部警示条
+      const prefDiffItems = preferenceList.filter(item => Boolean(preferenceMap[item.id]) && item.inSync === false);
+      const officialDiffItems = allList.filter(item => Boolean(selectedMap[item.id]) && item.inSync === false);
+      const pluginDiffItems = allPluginList.filter(
+        item => (item.id === FIXED_SYNC_PLUGIN_ID || Boolean(selectedPluginsMap[item.id])) && item.inSync === false
+      );
       const officialTabDiffCount = officialDiffItems.length;
       const dshAuTabDiffCount = prefDiffItems.length + (dshAuPluginItem && dshAuPluginItem.inSync === false ? 1 : 0);
-      const pluginTabDiffCount = otherPluginList.filter(item => item.inSync === false).length;
+      const pluginTabDiffCount = otherPluginList.filter(
+        item => Boolean(selectedPluginsMap[item.id]) && item.inSync === false
+      ).length;
       const totalDiffItems = [...prefDiffItems, ...officialDiffItems, ...pluginDiffItems];
       const totalDiffCount = totalDiffItems.length;
       const diffTitleSummary = totalDiffItems.slice(0, 3).map(item => item.title).join('、')
@@ -1411,8 +1420,8 @@
                 {
                   type: 'button',
                   role: 'tab',
-                  'aria-selected': !isPluginTab,
-                  className: `dsh-au-cloud-sync-tab${!isPluginTab ? ' is-active' : ''}`,
+                  'aria-selected': isOfficialTab,
+                  className: `dsh-au-cloud-sync-tab${isOfficialTab ? ' is-active' : ''}`,
                   onClick: () => setActiveTab('official'),
                 },
                 `DSH 官方设置 (${currentSelectedItems.length}/${allList.length})`,
@@ -1504,13 +1513,15 @@
                   h('p', { className: 'dsh-au-cloud-sync-pref-title' }, '每台电脑各存一份（互不覆盖）'),
                   preferenceList.map(item => {
                     const jump = PREFERENCE_JUMPS[item.id];
+                    const prefChecked = Boolean(preferenceMap[item.id]);
                     const prefInSync = item.inSync !== false;
                     const prefDiffLabel = item.diffLabel || (prefInSync ? '✓ 与云一致' : '本地与云不一致');
                     return h(
                     'div',
                     {
                       key: item.id,
-                      className: `dsh-au-cloud-sync-item${preferenceMap[item.id] ? ' is-checked' : ''}${!prefInSync ? ' is-diff' : ''}`,
+                      // 未勾选的本机设置项不加 is-diff 警示样式
+                      className: `dsh-au-cloud-sync-item${prefChecked ? ' is-checked' : ''}${prefChecked && !prefInSync ? ' is-diff' : ''}`,
                     },
                     h(
                       'div',
@@ -1521,7 +1532,7 @@
                       },
                       h('input', {
                         type: 'checkbox',
-                        checked: Boolean(preferenceMap[item.id]),
+                        checked: prefChecked,
                         disabled: busy,
                         style: { marginTop: 0 },
                         onClick: (e) => e.stopPropagation(),
@@ -1535,7 +1546,8 @@
                           { className: 'dsh-au-cloud-sync-item-head' },
                           h('span', { className: 'dsh-au-cloud-sync-item-cat' }, item.category || '本机设置'),
                           h('span', { className: 'dsh-au-cloud-sync-item-title' }, item.title),
-                          item.inSync !== undefined
+                          // 未勾选的本机设置项不显示不一致/同步角标
+                          prefChecked && item.inSync !== undefined
                             ? h(
                                 'span',
                                 {
@@ -1624,17 +1636,20 @@
                         { className: 'dsh-au-cloud-sync-item-head' },
                         h('span', { className: 'dsh-au-cloud-sync-item-cat' }, item.category || '云插件'),
                         h('span', { className: 'dsh-au-cloud-sync-item-title' }, item.title),
-                        h(
-                          'span',
-                          {
-                            className: `dsh-au-cloud-sync-diff-badge ${inSync ? 'is-sync' : 'is-diff'}`,
-                          },
-                          diffLabel
-                        ),
+                        // 未勾选的云插件不显示差异角标与单插件冲突操作按钮
+                        checked
+                          ? h(
+                              'span',
+                              {
+                                className: `dsh-au-cloud-sync-diff-badge ${inSync ? 'is-sync' : 'is-diff'}`,
+                              },
+                              diffLabel
+                            )
+                          : null,
                         h(
                           'span',
                           { className: 'dsh-au-cloud-sync-row-actions', onClick: (e) => e.stopPropagation() },
-                          !inSync && typeof onSyncSinglePlugin === 'function'
+                          checked && !inSync && typeof onSyncSinglePlugin === 'function'
                             ? [
                                 h(
                                   'button',
@@ -1818,6 +1833,21 @@
 
       useEffect(() => {
         void refreshSettings();
+        // 承接快捷键 Alt+2（cloudSync.open）的打开请求：既支持设置页已打开时即时弹出，也支持刚切换到 DSH AU 页签挂载后自动弹出。
+        const openFromShortcut = () => {
+          try { window.__dshAuPendingOpenCloudSyncModal = false; } catch {}
+          setMessage('');
+          setModalOpen(true);
+          void refreshSettings();
+        };
+        if (typeof window !== 'undefined') {
+          if (window.__dshAuPendingOpenCloudSyncModal) {
+            openFromShortcut();
+          }
+          window.addEventListener('dsh-au-open-cloud-sync-modal', openFromShortcut);
+          return () => window.removeEventListener('dsh-au-open-cloud-sync-modal', openFromShortcut);
+        }
+        return undefined;
       }, []);
 
       const handleToggle = async () => {
@@ -2001,13 +2031,17 @@
       const firstSyncDiffCount = allItems.filter(item => item.inSync === false && (cloudSync.selectedItems || []).includes(item.id)).length
         + allPluginItems.filter(item => item.inSync === false && (cloudSync.selectedPlugins || []).includes(item.id)).length
         + resolvedPreferenceItems.filter(item => item.inSync === false && (cloudSync.selectedPreferences || []).includes(item.id)).length;
-      const selectedCount = (cloudSync.selectedItems || []).length;
-      const selectedPluginCount = (cloudSync.selectedPlugins || []).length;
-      const selectedPreferenceCount = (cloudSync.selectedPreferences || []).length;
+      const selectedItemSet = new Set(cloudSync.selectedItems || []);
+      const selectedPluginSet = new Set(cloudSync.selectedPlugins || []);
+      const selectedPreferenceSet = new Set(cloudSync.selectedPreferences || []);
+      const selectedCount = selectedItemSet.size;
+      const selectedPluginCount = selectedPluginSet.size;
+      const selectedPreferenceCount = selectedPreferenceSet.size;
+      // 外层「待同步」计数仅统计已勾选参与同步的项（含固定同步的 dsh-au），避免未勾选项干扰提示
       const totalDiffCount = loaded
-        ? allItems.filter(i => i.inSync === false).length
-          + allPluginItems.filter(p => p.inSync === false).length
-          + resolvedPreferenceItems.filter(p => p.inSync === false).length
+        ? allItems.filter(i => selectedItemSet.has(i.id) && i.inSync === false).length
+          + allPluginItems.filter(p => (p.id === FIXED_SYNC_PLUGIN_ID || selectedPluginSet.has(p.id)) && p.inSync === false).length
+          + resolvedPreferenceItems.filter(p => selectedPreferenceSet.has(p.id) && p.inSync === false).length
         : 0;
       const selectionHint = `设置 ${selectedCount}/${allItems.length} · 插件 ${selectedPluginCount}/${allPluginItems.length} · 本机 ${selectedPreferenceCount}/${resolvedPreferenceItems.length}`;
 
