@@ -121,9 +121,15 @@
         const registerWorkbenchShortcut = (id, label, tab) => {
           try {
             // 注意：DSH 内置插件 @deepseek-ai/dsh-client-ui-sidebar-right 的 pane.split 占用了 Primary+Backslash 默认键位且未加 try/catch；
-            // 因此若自定义键位为 Backslash 或 Tab 则 defaults 传空对象由 keydown 兜底；其余键位（如默认 Alt+9/Alt+0）正常向宿主注册 defaults，使桌面端在远端未升级插件时也能直接拦截 iframe 按键。
-            const actionId = tab === 'fav' ? 'menu.open' : 'services.open';
-            const binding = effectiveShortcutBinding(actionId);
+            // 因此若自定义键位为 Backslash 或 Tab 则 defaults 传空对象由 keydown 兜底；其余键位（如默认 Alt+1/2/9/0）正常向宿主注册 defaults，使桌面端在远端未升级插件时也能直接拦截 iframe 按键。
+            const actionMap = {
+              settings: { actionId: 'settings.open', alias: 'open dsh-au settings' },
+              cloudSync: { actionId: 'cloudSync.open', alias: 'open cloud sync settings' },
+              fav: { actionId: 'menu.open', alias: 'open command menu' },
+              services: { actionId: 'services.open', alias: 'open background services' },
+            };
+            const mapped = actionMap[tab] || actionMap.services;
+            const binding = effectiveShortcutBinding(mapped.actionId);
             const platform = ctx.shortcuts?.platform;
             let defaults = {};
             if (binding && binding.code && binding.code !== 'Backslash' && binding.code !== 'Tab') {
@@ -141,7 +147,7 @@
             return ctx.shortcuts.register({
               id,
               label: () => label,
-              aliases: [id, tab === 'fav' ? 'open command menu' : 'open background services'],
+              aliases: [id, mapped.alias],
               defaults,
               regions: ['page', 'editable'],
               modals: [],
@@ -161,6 +167,8 @@
             // Ctrl+Tab 向右，Ctrl+Shift+Tab 向左（默认键位，可在设置页修改）；均保留当前设备栏折叠态。
             register('device.next.tab', 'dsh-au.device.next.ctrl-tab', '切换到右侧设备（备用）', 'Tab', 1),
             register('device.previous.tab', 'dsh-au.device.previous.ctrl-shift-tab', '切换到左侧设备（备用）', 'Tab', -1),
+            registerWorkbenchShortcut('dsh-au.settings.open', '打开 DSH AU 设置', 'settings'),
+            registerWorkbenchShortcut('dsh-au.cloud-sync.open', '打开云端同步设置', 'cloudSync'),
             registerWorkbenchShortcut('dsh-au.workbench.menu', '打开统一菜单', 'fav'),
             registerWorkbenchShortcut('dsh-au.workbench.services', '打开后台服务', 'services'),
           );

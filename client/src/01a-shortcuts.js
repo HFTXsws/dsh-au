@@ -25,6 +25,8 @@
       { id: 'device.next', label: '切换到右侧设备', defaults: keyBinding('BracketRight', { alt: true }), forward: true },
       { id: 'device.previous.tab', label: '切换到左侧设备 (备用)', defaults: keyBinding('Tab', { ctrl: true, shift: true }), forward: true },
       { id: 'device.next.tab', label: '切换到右侧设备 (备用)', defaults: keyBinding('Tab', { ctrl: true }), forward: true },
+      { id: 'settings.open', label: '打开 DSH AU 设置', defaults: platformShortcut(keyBinding('Digit1', { ctrl: true }), keyBinding('Digit1', { alt: true })), forward: true },
+      { id: 'cloudSync.open', label: '打开云端同步设置', defaults: platformShortcut(keyBinding('Digit2', { ctrl: true }), keyBinding('Digit2', { alt: true })), forward: true },
       { id: 'menu.open', label: '打开统一菜单', defaults: platformShortcut(keyBinding('Digit9', { ctrl: true }), keyBinding('Digit9', { alt: true })), forward: true },
       { id: 'services.open', label: '打开后台服务', defaults: platformShortcut(keyBinding('Digit0', { ctrl: true }), keyBinding('Digit0', { alt: true })), forward: true },
       { id: 'todo.toggle', label: '展开 / 收起待办面板', defaults: keyBinding('Backslash', { shift: true }), forward: true },

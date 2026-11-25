@@ -42,6 +42,8 @@ test('默认键位与图中的效果及新增动作一致，多一个修饰键�
     [key('BracketRight', { alt: true }), 'device.next'],
     [key('Tab', { ctrl: true }), 'device.next.tab'],
     [key('Tab', { ctrl: true, shift: true }), 'device.previous.tab'],
+    [key('Digit1', { alt: true }), 'settings.open'],
+    [key('Digit2', { alt: true }), 'cloudSync.open'],
     [key('Digit9', { alt: true }), 'menu.open'],
     [key('Digit0', { alt: true }), 'services.open'],
     [key('Delete', { ctrl: true }), 'todo.cycle'],
@@ -241,8 +243,11 @@ test('设置页与外壳接入快捷键管理的关键源码', () => {
   assert.match(code, /event\.data\.type === SHORTCUT_ACTION_MESSAGE && event\.data\.action === 'device\.refresh'/);
   assert.match(code, /event\.data\.type === SHORTCUT_ACTION_MESSAGE && event\.data\.action === 'dsh\.reload'/);
   assert.match(code, /event\.data\.type === SHORTCUT_ACTION_MESSAGE && event\.data\.action === 'dsh\.restart'/);
+  assert.match(code, /event\.data\.type === SHORTCUT_ACTION_MESSAGE && event\.data\.action === 'settings\.open'/);
+  assert.match(code, /event\.data\.type === SHORTCUT_ACTION_MESSAGE && event\.data\.action === 'cloudSync\.open'/);
   assert.match(code, /event\.data\.type === SHORTCUT_ACTION_MESSAGE && event\.data\.action === 'menu\.open'/);
   assert.match(code, /event\.data\.type === SHORTCUT_ACTION_MESSAGE && event\.data\.action === 'services\.open'/);
+  assert.match(code, /tab !== 'fav' && tab !== 'services' && tab !== 'settings' && tab !== 'cloudSync'/);
   assert.match(code, /findShortcutAction\(event\) !== 'todo\.cycle'/);
   assert.match(code, /findShortcutAction\(event\) !== 'todo\.toggle'/);
 });

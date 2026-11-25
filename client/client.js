@@ -1062,9 +1062,9 @@ window.__ModuleLoader__.load({
       };
     }
 
-    /** 快捷键服务与页面监听共用菜单事件，避免宿主先消费键盘事件后失效。 */
+    /** 快捷键服务与页面监听共用菜单与设置弹窗事件，避免宿主先消费键盘事件后失效。 */
     function dispatchWorkbenchShortcut(tab) {
-      if (tab !== 'fav' && tab !== 'services') return;
+      if (tab !== 'fav' && tab !== 'services' && tab !== 'settings' && tab !== 'cloudSync') return;
       window.dispatchEvent(new CustomEvent(WORKBENCH_SHORTCUT_EVENT, { detail: { tab } }));
     }
 
@@ -1148,6 +1148,8 @@ window.__ModuleLoader__.load({
       { id: 'device.next', label: '切换到右侧设备', defaults: keyBinding('BracketRight', { alt: true }), forward: true },
       { id: 'device.previous.tab', label: '切换到左侧设备 (备用)', defaults: keyBinding('Tab', { ctrl: true, shift: true }), forward: true },
       { id: 'device.next.tab', label: '切换到右侧设备 (备用)', defaults: keyBinding('Tab', { ctrl: true }), forward: true },
+      { id: 'settings.open', label: '打开 DSH AU 设置', defaults: platformShortcut(keyBinding('Digit1', { ctrl: true }), keyBinding('Digit1', { alt: true })), forward: true },
+      { id: 'cloudSync.open', label: '打开云端同步设置', defaults: platformShortcut(keyBinding('Digit2', { ctrl: true }), keyBinding('Digit2', { alt: true })), forward: true },
       { id: 'menu.open', label: '打开统一菜单', defaults: platformShortcut(keyBinding('Digit9', { ctrl: true }), keyBinding('Digit9', { alt: true })), forward: true },
       { id: 'services.open', label: '打开后台服务', defaults: platformShortcut(keyBinding('Digit0', { ctrl: true }), keyBinding('Digit0', { alt: true })), forward: true },
       { id: 'todo.toggle', label: '展开 / 收起待办面板', defaults: keyBinding('Backslash', { shift: true }), forward: true },
@@ -8838,6 +8840,10 @@ window.__ModuleLoader__.load({
             if (isDeviceSwitchMessageFromStage(event.source, frames)) triggerDshReload();
           } else if (event.data.type === SHORTCUT_ACTION_MESSAGE && event.data.action === 'dsh.restart') {
             if (isDeviceSwitchMessageFromStage(event.source, frames)) triggerDshRestart();
+          } else if (event.data.type === SHORTCUT_ACTION_MESSAGE && event.data.action === 'settings.open') {
+            if (isDeviceSwitchMessageFromStage(event.source, frames)) dispatchWorkbenchShortcut('settings');
+          } else if (event.data.type === SHORTCUT_ACTION_MESSAGE && event.data.action === 'cloudSync.open') {
+            if (isDeviceSwitchMessageFromStage(event.source, frames)) dispatchWorkbenchShortcut('cloudSync');
           } else if (event.data.type === SHORTCUT_ACTION_MESSAGE && event.data.action === 'menu.open') {
             if (isDeviceSwitchMessageFromStage(event.source, frames)) dispatchWorkbenchShortcut('fav');
           } else if (event.data.type === SHORTCUT_ACTION_MESSAGE && event.data.action === 'services.open') {
@@ -8877,19 +8883,33 @@ window.__ModuleLoader__.load({
         };
       }, [clearFailedLoad, clearStageTransition, compactMobile, devices, hosts, selectDevice, selectLocal, selectRelativeDevice, state.self?.deviceId, state.self?.instanceId]);
 
-      // 统一菜单与后台服务的快捷键（默认 Alt+9、Alt+0，可在设置页修改）由宿主快捷键服务与捕获阶段监听共同转为同一事件。
+      // 统一菜单、后台服务及 DSH AU / 云端同步弹窗的快捷键（默认 Alt+1/2/9/0，可在设置页修改）由宿主快捷键服务与捕获阶段监听共同转为同一事件。
       useEffect(() => {
+        const openCloudSyncSettingsDialog = () => {
+          // 设置弹窗未打开时 CloudSyncFeatureGroup 尚未挂载，先写待打开标记并派发事件，再打开 DSH AU 设置页签承接弹窗。
+          try { window.__dshAuPendingOpenCloudSyncModal = true; } catch {}
+          window.dispatchEvent(new CustomEvent('dsh-au-open-cloud-sync-modal'));
+          openDshAuSettingsDialog();
+        };
         const onWorkbenchShortcut = (event) => {
           const tab = event.detail?.tab;
           if (tab === 'fav') setWorkbenchTab((prev) => (prev === 'fav' ? null : 'fav'));
           else if (tab === 'services') setWorkbenchTab((prev) => (prev === 'services' ? null : 'services'));
+          else if (tab === 'settings') openDshAuSettingsDialog();
+          else if (tab === 'cloudSync') openCloudSyncSettingsDialog();
         };
         const onKey = (event) => {
           // 输入法组词阶段（isComposing / keyCode 229）绝不拦截按键
           if (event.isComposing || event.keyCode === 229) return;
           if (event.defaultPrevented) return;
           const actionId = findShortcutAction(event);
-          if (actionId === 'menu.open') {
+          if (actionId === 'settings.open') {
+            event.preventDefault();
+            dispatchWorkbenchShortcut('settings');
+          } else if (actionId === 'cloudSync.open') {
+            event.preventDefault();
+            dispatchWorkbenchShortcut('cloudSync');
+          } else if (actionId === 'menu.open') {
             event.preventDefault();
             dispatchWorkbenchShortcut('fav');
           } else if (actionId === 'services.open') {
@@ -10758,12 +10778,15 @@ window.__ModuleLoader__.load({
               ? h('span', { className: 'dsh-au-cloud-sync-row-hint' }, item.groupNote || '与 Cursor ACP 适配器、默认模型一起同步')
               : null
           ),
-          inSync
-            ? h('span', { className: 'dsh-au-cloud-sync-row-status' }, '与云一致')
-            : h('span', {
-                className: 'dsh-au-cloud-sync-row-status is-diff',
-                title: Array.isArray(item.diffDetails) && item.diffDetails.length > 0 ? `差异区块：${item.diffDetails.join('、')}` : undefined,
-              }, `与云 ${diffN} 处不同`),
+          // 未勾选参与同步的官方设置不显示差异角标与警示样式，避免干扰判断
+          checked
+            ? (inSync
+                ? h('span', { className: 'dsh-au-cloud-sync-row-status' }, '与云一致')
+                : h('span', {
+                    className: 'dsh-au-cloud-sync-row-status is-diff',
+                    title: Array.isArray(item.diffDetails) && item.diffDetails.length > 0 ? `差异区块：${item.diffDetails.join('、')}` : undefined,
+                  }, `与云 ${diffN} 处不同`))
+            : null,
           h('span', { className: 'dsh-au-cloud-sync-row-chevron', 'aria-hidden': 'true' }, '▾')
         ),
         expanded
@@ -10918,6 +10941,7 @@ window.__ModuleLoader__.load({
       // dsh-au 固定参与同步，单独放在「dsh-au 设置」页签；「其它云插件」页签不再列出它。
       const dshAuPluginItem = allPluginList.find(item => item.id === FIXED_SYNC_PLUGIN_ID) || null;
       const otherPluginList = allPluginList.filter(item => item.id !== FIXED_SYNC_PLUGIN_ID);
+      const isOfficialTab = activeTab === 'official';
       const isPluginTab = activeTab === 'plugins';
       const isDshAuTab = activeTab === 'dshau';
       const activeList = isPluginTab ? otherPluginList : [];
@@ -10967,12 +10991,17 @@ window.__ModuleLoader__.load({
         .map(item => item.id);
       const preferenceList = preferenceItems && preferenceItems.length > 0 ? preferenceItems : FALLBACK_PREFERENCE_ITEMS;
       const currentSelectedPreferences = preferenceList.filter(item => preferenceMap[item.id]).map(item => item.id);
-      const prefDiffItems = preferenceList.filter(item => item.inSync === false);
-      const officialDiffItems = allList.filter(item => item.inSync === false);
-      const pluginDiffItems = allPluginList.filter(item => item.inSync === false);
+      // 仅统计已勾选参与同步的项（含固定同步的 dsh-au），未勾选的差异不计入角标与顶部警示条
+      const prefDiffItems = preferenceList.filter(item => Boolean(preferenceMap[item.id]) && item.inSync === false);
+      const officialDiffItems = allList.filter(item => Boolean(selectedMap[item.id]) && item.inSync === false);
+      const pluginDiffItems = allPluginList.filter(
+        item => (item.id === FIXED_SYNC_PLUGIN_ID || Boolean(selectedPluginsMap[item.id])) && item.inSync === false
+      );
       const officialTabDiffCount = officialDiffItems.length;
       const dshAuTabDiffCount = prefDiffItems.length + (dshAuPluginItem && dshAuPluginItem.inSync === false ? 1 : 0);
-      const pluginTabDiffCount = otherPluginList.filter(item => item.inSync === false).length;
+      const pluginTabDiffCount = otherPluginList.filter(
+        item => Boolean(selectedPluginsMap[item.id]) && item.inSync === false
+      ).length;
       const totalDiffItems = [...prefDiffItems, ...officialDiffItems, ...pluginDiffItems];
       const totalDiffCount = totalDiffItems.length;
       const diffTitleSummary = totalDiffItems.slice(0, 3).map(item => item.title).join('、')
@@ -11042,8 +11071,8 @@ window.__ModuleLoader__.load({
                 {
                   type: 'button',
                   role: 'tab',
-                  'aria-selected': !isPluginTab,
-                  className: `dsh-au-cloud-sync-tab${!isPluginTab ? ' is-active' : ''}`,
+                  'aria-selected': isOfficialTab,
+                  className: `dsh-au-cloud-sync-tab${isOfficialTab ? ' is-active' : ''}`,
                   onClick: () => setActiveTab('official'),
                 },
                 `DSH 官方设置 (${currentSelectedItems.length}/${allList.length})`,
@@ -11135,13 +11164,15 @@ window.__ModuleLoader__.load({
                   h('p', { className: 'dsh-au-cloud-sync-pref-title' }, '每台电脑各存一份（互不覆盖）'),
                   preferenceList.map(item => {
                     const jump = PREFERENCE_JUMPS[item.id];
+                    const prefChecked = Boolean(preferenceMap[item.id]);
                     const prefInSync = item.inSync !== false;
                     const prefDiffLabel = item.diffLabel || (prefInSync ? '✓ 与云一致' : '本地与云不一致');
                     return h(
                     'div',
                     {
                       key: item.id,
-                      className: `dsh-au-cloud-sync-item${preferenceMap[item.id] ? ' is-checked' : ''}${!prefInSync ? ' is-diff' : ''}`,
+                      // 未勾选的本机设置项不加 is-diff 警示样式
+                      className: `dsh-au-cloud-sync-item${prefChecked ? ' is-checked' : ''}${prefChecked && !prefInSync ? ' is-diff' : ''}`,
                     },
                     h(
                       'div',
@@ -11152,7 +11183,7 @@ window.__ModuleLoader__.load({
                       },
                       h('input', {
                         type: 'checkbox',
-                        checked: Boolean(preferenceMap[item.id]),
+                        checked: prefChecked,
                         disabled: busy,
                         style: { marginTop: 0 },
                         onClick: (e) => e.stopPropagation(),
@@ -11166,7 +11197,8 @@ window.__ModuleLoader__.load({
                           { className: 'dsh-au-cloud-sync-item-head' },
                           h('span', { className: 'dsh-au-cloud-sync-item-cat' }, item.category || '本机设置'),
                           h('span', { className: 'dsh-au-cloud-sync-item-title' }, item.title),
-                          item.inSync !== undefined
+                          // 未勾选的本机设置项不显示不一致/同步角标
+                          prefChecked && item.inSync !== undefined
                             ? h(
                                 'span',
                                 {
@@ -11255,17 +11287,20 @@ window.__ModuleLoader__.load({
                         { className: 'dsh-au-cloud-sync-item-head' },
                         h('span', { className: 'dsh-au-cloud-sync-item-cat' }, item.category || '云插件'),
                         h('span', { className: 'dsh-au-cloud-sync-item-title' }, item.title),
-                        h(
-                          'span',
-                          {
-                            className: `dsh-au-cloud-sync-diff-badge ${inSync ? 'is-sync' : 'is-diff'}`,
-                          },
-                          diffLabel
-                        ),
+                        // 未勾选的云插件不显示差异角标与单插件冲突操作按钮
+                        checked
+                          ? h(
+                              'span',
+                              {
+                                className: `dsh-au-cloud-sync-diff-badge ${inSync ? 'is-sync' : 'is-diff'}`,
+                              },
+                              diffLabel
+                            )
+                          : null,
                         h(
                           'span',
                           { className: 'dsh-au-cloud-sync-row-actions', onClick: (e) => e.stopPropagation() },
-                          !inSync && typeof onSyncSinglePlugin === 'function'
+                          checked && !inSync && typeof onSyncSinglePlugin === 'function'
                             ? [
                                 h(
                                   'button',
@@ -11449,6 +11484,21 @@ window.__ModuleLoader__.load({
 
       useEffect(() => {
         void refreshSettings();
+        // 承接快捷键 Alt+2（cloudSync.open）的打开请求：既支持设置页已打开时即时弹出，也支持刚切换到 DSH AU 页签挂载后自动弹出。
+        const openFromShortcut = () => {
+          try { window.__dshAuPendingOpenCloudSyncModal = false; } catch {}
+          setMessage('');
+          setModalOpen(true);
+          void refreshSettings();
+        };
+        if (typeof window !== 'undefined') {
+          if (window.__dshAuPendingOpenCloudSyncModal) {
+            openFromShortcut();
+          }
+          window.addEventListener('dsh-au-open-cloud-sync-modal', openFromShortcut);
+          return () => window.removeEventListener('dsh-au-open-cloud-sync-modal', openFromShortcut);
+        }
+        return undefined;
       }, []);
 
       const handleToggle = async () => {
@@ -11632,13 +11682,17 @@ window.__ModuleLoader__.load({
       const firstSyncDiffCount = allItems.filter(item => item.inSync === false && (cloudSync.selectedItems || []).includes(item.id)).length
         + allPluginItems.filter(item => item.inSync === false && (cloudSync.selectedPlugins || []).includes(item.id)).length
         + resolvedPreferenceItems.filter(item => item.inSync === false && (cloudSync.selectedPreferences || []).includes(item.id)).length;
-      const selectedCount = (cloudSync.selectedItems || []).length;
-      const selectedPluginCount = (cloudSync.selectedPlugins || []).length;
-      const selectedPreferenceCount = (cloudSync.selectedPreferences || []).length;
+      const selectedItemSet = new Set(cloudSync.selectedItems || []);
+      const selectedPluginSet = new Set(cloudSync.selectedPlugins || []);
+      const selectedPreferenceSet = new Set(cloudSync.selectedPreferences || []);
+      const selectedCount = selectedItemSet.size;
+      const selectedPluginCount = selectedPluginSet.size;
+      const selectedPreferenceCount = selectedPreferenceSet.size;
+      // 外层「待同步」计数仅统计已勾选参与同步的项（含固定同步的 dsh-au），避免未勾选项干扰提示
       const totalDiffCount = loaded
-        ? allItems.filter(i => i.inSync === false).length
-          + allPluginItems.filter(p => p.inSync === false).length
-          + resolvedPreferenceItems.filter(p => p.inSync === false).length
+        ? allItems.filter(i => selectedItemSet.has(i.id) && i.inSync === false).length
+          + allPluginItems.filter(p => (p.id === FIXED_SYNC_PLUGIN_ID || selectedPluginSet.has(p.id)) && p.inSync === false).length
+          + resolvedPreferenceItems.filter(p => selectedPreferenceSet.has(p.id) && p.inSync === false).length
         : 0;
       const selectionHint = `设置 ${selectedCount}/${allItems.length} · 插件 ${selectedPluginCount}/${allPluginItems.length} · 本机 ${selectedPreferenceCount}/${resolvedPreferenceItems.length}`;
 
@@ -20941,9 +20995,15 @@ window.__ModuleLoader__.load({
         const registerWorkbenchShortcut = (id, label, tab) => {
           try {
             // 注意：DSH 内置插件 @deepseek-ai/dsh-client-ui-sidebar-right 的 pane.split 占用了 Primary+Backslash 默认键位且未加 try/catch；
-            // 因此若自定义键位为 Backslash 或 Tab 则 defaults 传空对象由 keydown 兜底；其余键位（如默认 Alt+9/Alt+0）正常向宿主注册 defaults，使桌面端在远端未升级插件时也能直接拦截 iframe 按键。
-            const actionId = tab === 'fav' ? 'menu.open' : 'services.open';
-            const binding = effectiveShortcutBinding(actionId);
+            // 因此若自定义键位为 Backslash 或 Tab 则 defaults 传空对象由 keydown 兜底；其余键位（如默认 Alt+1/2/9/0）正常向宿主注册 defaults，使桌面端在远端未升级插件时也能直接拦截 iframe 按键。
+            const actionMap = {
+              settings: { actionId: 'settings.open', alias: 'open dsh-au settings' },
+              cloudSync: { actionId: 'cloudSync.open', alias: 'open cloud sync settings' },
+              fav: { actionId: 'menu.open', alias: 'open command menu' },
+              services: { actionId: 'services.open', alias: 'open background services' },
+            };
+            const mapped = actionMap[tab] || actionMap.services;
+            const binding = effectiveShortcutBinding(mapped.actionId);
             const platform = ctx.shortcuts?.platform;
             let defaults = {};
             if (binding && binding.code && binding.code !== 'Backslash' && binding.code !== 'Tab') {
@@ -20961,7 +21021,7 @@ window.__ModuleLoader__.load({
             return ctx.shortcuts.register({
               id,
               label: () => label,
-              aliases: [id, tab === 'fav' ? 'open command menu' : 'open background services'],
+              aliases: [id, mapped.alias],
               defaults,
               regions: ['page', 'editable'],
               modals: [],
@@ -20981,6 +21041,8 @@ window.__ModuleLoader__.load({
             // Ctrl+Tab 向右，Ctrl+Shift+Tab 向左（默认键位，可在设置页修改）；均保留当前设备栏折叠态。
             register('device.next.tab', 'dsh-au.device.next.ctrl-tab', '切换到右侧设备（备用）', 'Tab', 1),
             register('device.previous.tab', 'dsh-au.device.previous.ctrl-shift-tab', '切换到左侧设备（备用）', 'Tab', -1),
+            registerWorkbenchShortcut('dsh-au.settings.open', '打开 DSH AU 设置', 'settings'),
+            registerWorkbenchShortcut('dsh-au.cloud-sync.open', '打开云端同步设置', 'cloudSync'),
             registerWorkbenchShortcut('dsh-au.workbench.menu', '打开统一菜单', 'fav'),
             registerWorkbenchShortcut('dsh-au.workbench.services', '打开后台服务', 'services'),
           );

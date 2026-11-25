@@ -1056,9 +1056,9 @@
       };
     }
 
-    /** 快捷键服务与页面监听共用菜单事件，避免宿主先消费键盘事件后失效。 */
+    /** 快捷键服务与页面监听共用菜单与设置弹窗事件，避免宿主先消费键盘事件后失效。 */
     function dispatchWorkbenchShortcut(tab) {
-      if (tab !== 'fav' && tab !== 'services') return;
+      if (tab !== 'fav' && tab !== 'services' && tab !== 'settings' && tab !== 'cloudSync') return;
       window.dispatchEvent(new CustomEvent(WORKBENCH_SHORTCUT_EVENT, { detail: { tab } }));
     }
 

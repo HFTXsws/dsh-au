@@ -1391,6 +1391,10 @@
             if (isDeviceSwitchMessageFromStage(event.source, frames)) triggerDshReload();
           } else if (event.data.type === SHORTCUT_ACTION_MESSAGE && event.data.action === 'dsh.restart') {
             if (isDeviceSwitchMessageFromStage(event.source, frames)) triggerDshRestart();
+          } else if (event.data.type === SHORTCUT_ACTION_MESSAGE && event.data.action === 'settings.open') {
+            if (isDeviceSwitchMessageFromStage(event.source, frames)) dispatchWorkbenchShortcut('settings');
+          } else if (event.data.type === SHORTCUT_ACTION_MESSAGE && event.data.action === 'cloudSync.open') {
+            if (isDeviceSwitchMessageFromStage(event.source, frames)) dispatchWorkbenchShortcut('cloudSync');
           } else if (event.data.type === SHORTCUT_ACTION_MESSAGE && event.data.action === 'menu.open') {
             if (isDeviceSwitchMessageFromStage(event.source, frames)) dispatchWorkbenchShortcut('fav');
           } else if (event.data.type === SHORTCUT_ACTION_MESSAGE && event.data.action === 'services.open') {
@@ -1430,19 +1434,33 @@
         };
       }, [clearFailedLoad, clearStageTransition, compactMobile, devices, hosts, selectDevice, selectLocal, selectRelativeDevice, state.self?.deviceId, state.self?.instanceId]);
 
-      // 统一菜单与后台服务的快捷键（默认 Alt+9、Alt+0，可在设置页修改）由宿主快捷键服务与捕获阶段监听共同转为同一事件。
+      // 统一菜单、后台服务及 DSH AU / 云端同步弹窗的快捷键（默认 Alt+1/2/9/0，可在设置页修改）由宿主快捷键服务与捕获阶段监听共同转为同一事件。
       useEffect(() => {
+        const openCloudSyncSettingsDialog = () => {
+          // 设置弹窗未打开时 CloudSyncFeatureGroup 尚未挂载，先写待打开标记并派发事件，再打开 DSH AU 设置页签承接弹窗。
+          try { window.__dshAuPendingOpenCloudSyncModal = true; } catch {}
+          window.dispatchEvent(new CustomEvent('dsh-au-open-cloud-sync-modal'));
+          openDshAuSettingsDialog();
+        };
         const onWorkbenchShortcut = (event) => {
           const tab = event.detail?.tab;
           if (tab === 'fav') setWorkbenchTab((prev) => (prev === 'fav' ? null : 'fav'));
           else if (tab === 'services') setWorkbenchTab((prev) => (prev === 'services' ? null : 'services'));
+          else if (tab === 'settings') openDshAuSettingsDialog();
+          else if (tab === 'cloudSync') openCloudSyncSettingsDialog();
         };
         const onKey = (event) => {
           // 输入法组词阶段（isComposing / keyCode 229）绝不拦截按键
           if (event.isComposing || event.keyCode === 229) return;
           if (event.defaultPrevented) return;
           const actionId = findShortcutAction(event);
-          if (actionId === 'menu.open') {
+          if (actionId === 'settings.open') {
+            event.preventDefault();
+            dispatchWorkbenchShortcut('settings');
+          } else if (actionId === 'cloudSync.open') {
+            event.preventDefault();
+            dispatchWorkbenchShortcut('cloudSync');
+          } else if (actionId === 'menu.open') {
             event.preventDefault();
             dispatchWorkbenchShortcut('fav');
           } else if (actionId === 'services.open') {
