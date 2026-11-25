@@ -1072,6 +1072,12 @@ test('loadDshProfilesManifest：支持私有仓自定义方案名、任意模板
 
 test('findOutdatedCloudPlugins 能识别版本落后于云端的托管插件与普通云插件，且前端包含启动弹窗提示', (t) => {
   const { root: syncRepoRoot, syncDir } = makeTempSyncRepo('dsh-outdated-plugins-');
+  writeTestProfilesManifest(syncRepoRoot, {
+    defaultProfile: 'general',
+    profiles: [
+      { id: 'general', label: 'General', file: 'app-config/dsh/cordis.patch.general.yml', selectable: true },
+    ],
+  });
   const dshHome = mkdtempSync(path.join(tmpdir(), 'dsh-outdated-home-'));
   const prevManifestEnv = process.env.DSH_AU_CLOUD_MANIFEST_PATH;
   t.after(() => {
