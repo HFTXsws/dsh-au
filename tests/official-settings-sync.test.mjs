@@ -25,6 +25,7 @@ import {
   normalizeLocalPatchPaths,
   getAllCloudPluginIds,
   pushLocalOfficialSettingsToRepo,
+  readLocalClaudeLauncherSettings,
   resolveDshProfilesManifestPath,
   resolveRepoProfilePatchPath,
   restoreUncheckedSettingsFromMachine,
@@ -2297,6 +2298,81 @@ test('pushLocalOfficialSettingsToRepo：语义等价时跳过覆写，保留仓�
   assert.equal(readFileSync(repoPatchPath, 'utf8'), repoPatchOriginal);
   assert.equal(readFileSync(repoDesktopPath, 'utf8'), repoDesktopOriginal);
 });
+
+test('修复 3 项假冲突：缩进注释忽略、~/.codex/gateway-models.json 查找、launcher-state.json claude.target 嵌套读取', (t) => {
+  const tempRoot = mkdtempSync(path.join(tmpdir(), 'dsh-fix-3-bugs-'));
+  const prevHome = process.env.USERPROFILE;
+  const prevUnixHome = process.env.HOME;
+  t.after(() => {
+    if (prevHome === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = prevHome;
+    if (prevUnixHome === undefined) delete process.env.HOME;
+    else process.env.HOME = prevUnixHome;
+    rmSync(tempRoot, { recursive: true, force: true });
+  });
+
+  const fakeHome = path.join(tempRoot, 'home');
+  const dshHome = path.join(fakeHome, '.dsh');
+  const dotCodexDir = path.join(fakeHome, '.codex');
+  const claudeDir = path.join(fakeHome, '.claude');
+  const launcherDir = path.join(fakeHome, '.ai-sync-config');
+  const profileDir = path.join(dshHome, 'profiles', 'desktop');
+  const repoRoot = path.join(tempRoot, 'repo');
+
+  mkdirSync(profileDir, { recursive: true });
+  mkdirSync(dotCodexDir, { recursive: true });
+  mkdirSync(claudeDir, { recursive: true });
+  mkdirSync(launcherDir, { recursive: true });
+  mkdirSync(path.join(repoRoot, 'app-config', 'dsh'), { recursive: true });
+  mkdirSync(path.join(repoRoot, 'app-config', 'codex'), { recursive: true });
+  writeTestProfilesManifest(repoRoot);
+
+  // 1. 仓库含缩进注释，本机不含注释 -> 模型提供商应判 inSync: true
+  writeFileSync(path.join(repoRoot, 'app-config', 'dsh', 'cordis.patch.general.yml'), [
+    '- id: llm-pi-ai',
+    '  config:',
+    '    providers:',
+    '      demo:',
+    '        # 带缩进注释',
+    '        baseURL: https://example.com',
+    '',
+  ].join('\n'));
+  writeFileSync(path.join(profileDir, 'cordis.patch.yml'), [
+    '- id: llm-pi-ai',
+    '  config:',
+    '    providers:',
+    '      demo:',
+    '        baseURL: https://example.com',
+    '',
+  ].join('\n'));
+
+  // 2. Codex 模型目录位于 ~/.codex/gateway-models.json（~/.dsh/codex 下无文件）
+  const codexModels = JSON.stringify({ models: [{ id: 'gpt-5' }, { id: 'gpt-6' }] });
+  writeFileSync(path.join(repoRoot, 'app-config', 'codex', 'gateway-models.json'), codexModels);
+  writeFileSync(path.join(dotCodexDir, 'gateway-models.json'), codexModels);
+
+  // 3. launcher-state.json 使用嵌套结构 { claude: { target: 'antigravity' } }
+  process.env.USERPROFILE = fakeHome;
+  process.env.HOME = fakeHome;
+  writeFileSync(path.join(claudeDir, 'settings.json'), JSON.stringify({ env: { ANTHROPIC_MODEL: 'm1' } }));
+  writeFileSync(path.join(launcherDir, 'launcher-state.json'), JSON.stringify({ claude: { target: 'antigravity' } }));
+
+  const items = buildOfficialSyncItems({
+    repoRoot,
+    dshHome,
+    profile: 'general',
+    selectedItems: ['llm-pi-ai', 'codex-catalog', 'claude-launcher'],
+  });
+  const llmItem = items.find((i) => i.id === 'llm-pi-ai');
+  const codexItem = items.find((i) => i.id === 'codex-catalog');
+  assert.equal(llmItem?.inSync, true);
+  assert.equal(codexItem?.inSync, true);
+
+  const localLauncher = readLocalClaudeLauncherSettings({ dshHome });
+  assert.equal(localLauncher.gateway, 'antigravity');
+  assert.equal(localLauncher.ANTHROPIC_MODEL, 'm1');
+});
+
 
 
 
