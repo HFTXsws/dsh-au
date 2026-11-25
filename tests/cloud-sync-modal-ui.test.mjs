@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { build } from '../scripts/build-client.js';
 
 const RETURN_LINE = "    return { name: 'dsh-au', inject, apply, mobile: mobileClient.helpers, shortcuts: shortcutHelpers };";
-const EXPORT_HOOK = "\n    globalThis.__AU_SETTINGS_TEST__ = { CloudSyncModal, CloudSyncFeatureGroup, renderOfficialRow };\n" + RETURN_LINE;
+const EXPORT_HOOK = "\n    globalThis.__AU_SETTINGS_TEST__ = { CloudSyncModal, CloudSyncFeatureGroup };\n" + RETURN_LINE;
 
 function makeWindow() {
   const store = new Map();
@@ -20,7 +20,7 @@ function makeWindow() {
   };
 }
 
-/** 支持状态更新与重渲染的极简假 React，用于验证真实组件树与 Tab 切换交互。 */
+/** 支持状态更新与重渲染的极简假 React，用于验证真实组件树与交互。 */
 function makeStatefulReact(initialStates = []) {
   const states = [...initialStates];
   let cursor = 0;
@@ -91,6 +91,8 @@ function textOf(node) {
   return '';
 }
 
+const hasClass = (node, cls) => String(node?.props?.className || '').split(/\s+/).includes(cls);
+
 function renderComponent(Component, props, react) {
   const expand = (node) => {
     if (!node || typeof node !== 'object') return node;
@@ -120,118 +122,253 @@ function makeModalProps(overrides = {}) {
     cloudSync: {
       enabled: true,
       profile: 'general',
-      selectedItems: ['ui-theme'],
+      selectedItems: [
+        'ui-theme',
+        'ui-chat',
+        'ui-settings-account',
+        'session-log-deepseek',
+        'subagent-models',
+        'permission-preset',
+        'desktop-preferences',
+        'llm-pi-ai',
+        'agent-default-model',
+      ],
       selectedPlugins: ['dsh-au', 'plugin-a'],
       syncPluginConfigs: ['dsh-au', 'plugin-a'],
       selectedPreferences: ['shortcuts'],
+      lastSyncedAt: '2 分钟前自动同步',
     },
     profileOptions: [{ id: 'general', label: '通用' }],
     items: [
-      { id: 'ui-theme', title: '界面主题', inSync: false, diffDetails: ['主题'] },
-      { id: 'ui-chat', title: '对话样式', inSync: false, diffDetails: ['字体'] },
+      { id: 'ui-theme', title: '外观：字号', inSync: true },
+      { id: 'ui-chat', title: '聊天内容展示', inSync: true },
+      { id: 'ui-settings-account', title: '账号设置界面', inSync: true },
+      { id: 'session-log-deepseek', title: '会话日志上传设置', inSync: true },
+      { id: 'subagent-models', title: '子智能体：模型选择', inSync: true },
+      { id: 'permission-preset', title: '权限：新会话的默认权限模式', inSync: true },
+      { id: 'desktop-preferences', title: '桌面设置', inSync: true },
+      {
+        id: 'llm-pi-ai',
+        title: '模型提供商',
+        category: 'models',
+        summary: '2 家供应商 · 11 个模型',
+        detailTags: [
+          { label: 'gbu-full', value: 'GBU · 6 模型' },
+          { label: 'antigravity', value: '反重力 · 5 模型' },
+        ],
+        inSync: true,
+      },
+      { id: 'agent-default-model', title: '默认模型', category: 'models', summary: 'gbu-full / gbu-gemini-4-neon', inSync: true },
+      { id: 'claude-launcher', title: 'Claude 启动器与 4 档位映射', category: 'models', summary: '当前网关：GBU', inSync: true },
+      { id: 'codex-catalog', title: 'Codex 模型目录', category: 'models', summary: '12 个网关模型', inSync: true },
+      { id: 'dsh-acp-adapter', title: 'Cursor ACP 适配器', category: 'models', summary: '已启用', inSync: true },
     ],
     itemsByProfile: null,
     pluginItems: [
-      { id: 'dsh-au', title: 'dsh-au', category: '自研插件', inSync: false, diffLabel: '有差异' },
-      { id: 'plugin-a', title: '已勾选插件A', category: '云插件', inSync: false, diffLabel: '有差异' },
-      { id: 'plugin-b', title: '未勾选插件B', category: '云插件', inSync: false, diffLabel: '有差异' },
+      { id: 'dsh-au', title: 'dsh-au', category: '自研插件', inSync: true },
+      { id: 'plugin-a', title: 'dsh-mcp-bridge', category: '云插件', inSync: true },
+      { id: 'plugin-b', title: 'dsh-local-ocr', category: '云插件', inSync: true },
     ],
     preferenceItems: [
-      { id: 'shortcuts', title: '已勾选快捷键', category: '本机设置', inSync: false, diffLabel: '本地与云不一致' },
-      { id: 'model-shortcuts', title: '未勾选模型槽位', category: '本机设置', inSync: false, diffLabel: '本地与云不一致' },
+      { id: 'shortcuts', title: '快捷键配置', category: '本机设置', inSync: true },
+      { id: 'modelShortcuts', title: '快捷模型配置', category: '本机设置', inSync: true },
     ],
-    machineId: 'test-machine',
+    machineId: 'Xad-Yoga',
+    onQuickSave: () => {},
     onSave: () => {},
     onSaveAndSync: () => {},
     onPushToRepo: () => {},
-    onSyncSinglePlugin: () => {},
+    onResolveConflict: () => {},
     busy: false,
     message: '',
     ...overrides,
   };
 }
 
-test('CloudSyncModal：切换到「dsh-au 设置」页签时仅单高亮，不再同时高亮「DSH 官方设置」', () => {
+test('CloudSyncModal：单页默认折叠态渲染 4 张卡片，DSH 官方配置无展开箭头，其余 3 卡片展开后可自由单选/多选并即时保存', () => {
+  const savedCalls = [];
   const react = makeStatefulReact();
   const { CloudSyncModal } = loadSettingsComponents(react);
-  const props = makeModalProps();
+  const props = makeModalProps({
+    onQuickSave: (payload) => savedCalls.push(payload),
+  });
 
-  // 初始渲染：默认在「DSH 官方设置」页签
+  // 初始折叠态：无 Tab、顶部显示绿色一致状态条
   let tree = renderComponent(CloudSyncModal, props, react);
-  let tabs = findAll(tree, (n) => n.type === 'button' && n.props?.role === 'tab');
-  assert.equal(tabs.length, 3);
-  assert.equal(tabs[0].props['aria-selected'], true);
-  assert.match(tabs[0].props.className, /\bis-active\b/);
-  assert.equal(tabs[1].props['aria-selected'], false);
-  assert.doesNotMatch(tabs[1].props.className, /\bis-active\b/);
-  assert.equal(tabs[2].props['aria-selected'], false);
+  assert.equal(findAll(tree, (n) => n.props?.role === 'tab').length, 0, '单页布局不应再渲染 Tab');
+  assert.equal(findAll(tree, (n) => hasClass(n, 'dsh-au-cs-status-ok')).length, 1, '全部一致时应显示绿色状态条');
+  assert.equal(findAll(tree, (n) => hasClass(n, 'dsh-au-cs-diff-panel')).length, 0, '无差异时不应浮出冲突区');
 
-  // 点击切换到「dsh-au 设置」页签
-  tabs[1].props.onClick();
+  const cards = findAll(tree, (n) => hasClass(n, 'dsh-au-cs-group-card'));
+  assert.equal(cards.length, 4, '应渲染 4 张大类卡片');
+
+  // 1. DSH 官方配置：纯开关卡片，无展开箭头与明细
+  const officialCard = cards[0];
+  assert.match(textOf(officialCard), /DSH 官方配置/);
+  assert.match(textOf(officialCard), /云端共享/);
+  assert.equal(findAll(officialCard, (n) => hasClass(n, 'dsh-au-cs-caret')).length, 0, 'DSH 官方配置不得有展开箭头');
+  assert.equal(findAll(officialCard, (n) => hasClass(n, 'dsh-au-cs-group-detail')).length, 0);
+
+  // 2/3/4 卡片默认折叠
+  assert.equal(findAll(tree, (n) => hasClass(n, 'dsh-au-cs-group-detail')).length, 0, '模型配置/其它云插件/快捷操作默认应折叠');
+
+  // 点击展开「模型配置」，应展示 5 项精细行与供应商 tag
+  const modelTop = findAll(cards[1], (n) => hasClass(n, 'dsh-au-cs-group-top'))[0];
+  modelTop.props.onClick();
   tree = renderComponent(CloudSyncModal, props, react);
-  tabs = findAll(tree, (n) => n.type === 'button' && n.props?.role === 'tab');
-  assert.equal(tabs[0].props['aria-selected'], false, '切到 dsh-au 后官方设置 aria-selected 必须为 false');
-  assert.doesNotMatch(tabs[0].props.className, /\bis-active\b/, '切到 dsh-au 后官方设置不得保留 is-active');
-  assert.equal(tabs[1].props['aria-selected'], true);
-  assert.match(tabs[1].props.className, /\bis-active\b/);
-  assert.equal(tabs[2].props['aria-selected'], false);
-  assert.doesNotMatch(tabs[2].props.className, /\bis-active\b/);
+  let openCards = findAll(tree, (n) => hasClass(n, 'dsh-au-cs-group-card'));
+  const modelRows = findAll(openCards[1], (n) => hasClass(n, 'dsh-au-cs-model-row'));
+  assert.equal(modelRows.length, 5, '模型配置展开后应显示 5 项精细行');
+  assert.match(textOf(modelRows[0]), /llm-pi-ai/);
+  assert.match(textOf(modelRows[0]), /2 家供应商 · 11 个模型/);
+  assert.match(textOf(modelRows[0]), /gbu-full/);
+
+  // 单选勾选第 3 项 claude-launcher，触发 onQuickSave 且不关闭弹窗
+  modelRows[2].props.onClick();
+  assert.equal(savedCalls.length, 1);
+  assert.ok(savedCalls[0].selectedItems.includes('claude-launcher'));
+
+  // 展开「其它云插件」并自由勾选 plugin-b
+  tree = renderComponent(CloudSyncModal, props, react);
+  openCards = findAll(tree, (n) => hasClass(n, 'dsh-au-cs-group-card'));
+  const pluginTop = findAll(openCards[2], (n) => hasClass(n, 'dsh-au-cs-group-top'))[0];
+  pluginTop.props.onClick();
+  tree = renderComponent(CloudSyncModal, props, react);
+  openCards = findAll(tree, (n) => hasClass(n, 'dsh-au-cs-group-card'));
+  const pluginChips = findAll(openCards[2], (n) => hasClass(n, 'dsh-au-cs-chip'));
+  assert.equal(pluginChips.length, 2, '其它云插件不含 dsh-au，仅 2 个插件 chip');
+  pluginChips[1].props.onClick();
+  assert.equal(savedCalls.length, 2);
+  assert.ok(savedCalls[1].selectedPlugins.includes('plugin-b'));
+
+  // 底部只保留「完成」按钮，且包含固定共享说明
+  assert.match(textOf(tree), /dsh-au 基础开关默认全机共享/);
+  const footerBtns = findAll(tree, (n) => hasClass(n, 'dsh-au-cs-btn-close-footer'));
+  assert.equal(footerBtns.length, 1);
+  assert.equal(textOf(footerBtns[0]), '完成');
 });
 
-test('CloudSyncModal：未勾选配置项隐藏不一致角标与警示样式，且不计入页签角标和顶部提示条', () => {
+test('CloudSyncModal：冲突区在有差异时浮出，点击冲突行展开双栏对比且快捷键带中文名称备注', () => {
+  const resolved = [];
   const react = makeStatefulReact();
   const { CloudSyncModal } = loadSettingsComponents(react);
-  const props = makeModalProps();
+  const props = makeModalProps({
+    cloudSync: {
+      enabled: true,
+      profile: 'general',
+      conflict: true,
+      selectedItems: ['ui-theme'],
+      selectedPlugins: ['dsh-au', 'plugin-a'],
+      selectedPreferences: ['shortcuts', 'modelShortcuts'],
+    },
+    items: [
+      {
+        id: 'ui-theme',
+        title: '外观：字号',
+        inSync: false,
+        fields: [{ key: 'ui-theme.fontSize', label: '字号', local: '15px', cloud: '14px' }],
+      },
+      { id: 'ui-chat', title: '聊天内容展示', inSync: false }, // 未勾选，不应出现在冲突区
+    ],
+    pluginItems: [
+      { id: 'dsh-au', title: 'dsh-au', inSync: false, diffLines: [{ key: 'sidebarWorkbench', label: '侧边栏显示 DSH AU', local: true, cloud: false, changed: true }] },
+      { id: 'plugin-a', title: 'dsh-mcp-bridge', inSync: false, diffLines: [{ key: 'timeoutMs', label: '超时时间', local: 15000, cloud: 30000, changed: true }] },
+    ],
+    preferenceItems: [
+      {
+        id: 'shortcuts',
+        title: '快捷键配置',
+        inSync: false,
+        diffLines: [
+          {
+            key: 'cloudSync.open',
+            local: { code: 'Digit2', alt: true, ctrl: false, shift: false, meta: false },
+            cloud: { code: 'Digit2', alt: true, ctrl: false, shift: true, meta: false },
+            changed: true,
+          },
+        ],
+      },
+      {
+        id: 'modelShortcuts',
+        title: '快捷模型配置',
+        inSync: false,
+        diffLines: [{ key: 'slot1', label: '槽位 1', local: 'gbu-gemini-4-neon', cloud: 'claude-sonnet-4-5', changed: true }],
+      },
+    ],
+    onResolveConflict: (args) => resolved.push(args),
+  });
 
-  // 1. 官方设置页签：仅 1 项已勾选不一致
   let tree = renderComponent(CloudSyncModal, props, react);
-  let tabs = findAll(tree, (n) => n.type === 'button' && n.props?.role === 'tab');
-  assert.match(textOf(tabs[0]), /1 项不一致/);
-  assert.match(textOf(tabs[1]), /2 项不一致/); // 1 个已勾选本机设置 + 1 个固定同步 dsh-au
-  assert.match(textOf(tabs[2]), /1 项不一致/); // 1 个已勾选其它云插件
+  const diffPanel = findAll(tree, (n) => hasClass(n, 'dsh-au-cs-diff-panel'));
+  assert.equal(diffPanel.length, 1, '有差异时应浮出琥珀色冲突区');
+  assert.match(textOf(diffPanel[0]), /检测到 5 项冲突 \/ 不一致/);
+  assert.doesNotMatch(textOf(diffPanel[0]), /聊天内容展示/, '未勾选的配置项不应出现在冲突区');
 
-  const banner = findAll(tree, (n) => String(n.props?.className || '').includes('dsh-au-cloud-sync-diff-banner'));
-  assert.equal(banner.length, 1);
-  const bannerText = textOf(banner[0]);
-  assert.match(bannerText, /4 项不一致/);
-  assert.doesNotMatch(bannerText, /对话样式|未勾选插件B|未勾选模型槽位/);
+  const diffItems = findAll(diffPanel[0], (n) => hasClass(n, 'dsh-au-cs-diff-item'));
+  assert.equal(diffItems.length, 5, '快捷键、快捷模型与 dsh-au 基础开关各自独立成行');
+  // 冲突行展开前不显示 compare 网格
+  assert.equal(findAll(diffPanel[0], (n) => hasClass(n, 'dsh-au-cs-compare-grid')).length, 0);
 
-  const officialRows = findAll(tree, (n) => String(n.props?.className || '').includes('dsh-au-cloud-sync-row-item'));
-  assert.equal(officialRows.length, 2);
-  // 已勾选行显示差异角标
-  assert.equal(findAll(officialRows[0], (n) => String(n.props?.className || '').includes('dsh-au-cloud-sync-row-status is-diff')).length, 1);
-  // 未勾选行不显示差异角标也不带 is-diff
-  assert.equal(findAll(officialRows[1], (n) => String(n.props?.className || '').includes('dsh-au-cloud-sync-row-status')).length, 0);
-  assert.equal(findAll(officialRows[1], (n) => String(n.props?.className || '').includes('is-diff')).length, 0);
+  // 点击「快捷键配置」冲突行展开双栏对比
+  const shortcutDiffRow = diffItems.find(item => textOf(item).includes('快捷键配置'));
+  assert.ok(shortcutDiffRow, '应包含独立的快捷键配置冲突行');
+  const rowHead = findAll(shortcutDiffRow, (n) => hasClass(n, 'dsh-au-cs-diff-row-head'))[0];
+  rowHead.props.onClick();
 
-  const hasClass = (node, cls) => String(node.props?.className || '').split(/\s+/).includes(cls);
-
-  // 2. 切到「dsh-au 设置」页签：未勾选的本机设置项不显示角标和 is-diff
-  tabs[1].props.onClick();
   tree = renderComponent(CloudSyncModal, props, react);
-  const prefItems = findAll(tree, (n) => hasClass(n, 'dsh-au-cloud-sync-item'));
-  // 第 0 项为固定同步的 dsh-au 版本与开关，第 1 项为已勾选 shortcuts，第 2 项为未勾选 model-shortcuts
-  assert.equal(prefItems.length, 3);
-  assert.match(prefItems[0].props.className, /\bis-diff\b/);
-  assert.match(prefItems[1].props.className, /\bis-diff\b/);
-  assert.equal(findAll(prefItems[1], (n) => hasClass(n, 'dsh-au-cloud-sync-diff-badge')).length, 1);
-  assert.doesNotMatch(prefItems[2].props.className, /\bis-diff\b/);
-  assert.equal(findAll(prefItems[2], (n) => hasClass(n, 'dsh-au-cloud-sync-diff-badge')).length, 0);
+  const compareGrids = findAll(tree, (n) => hasClass(n, 'dsh-au-cs-compare-grid'));
+  assert.equal(compareGrids.length, 1, '点击冲突行应展开双栏对比');
+  const compareText = textOf(compareGrids[0]);
+  assert.match(compareText, /打开云端同步设置（cloudSync\.open）/);
+  assert.match(compareText, /Alt\+2/);
+  assert.match(compareText, /Alt\+Shift\+2/);
 
-  // 3. 切到「其它云插件」页签：未勾选插件不显示差异角标和单插件同步按钮
-  tabs = findAll(tree, (n) => n.type === 'button' && n.props?.role === 'tab');
-  tabs[2].props.onClick();
+  // 点击单项「用本机」按钮应触发 onResolveConflict
+  const miniBtns = findAll(shortcutDiffRow, (n) => hasClass(n, 'dsh-au-cs-mini-btn'));
+  assert.equal(miniBtns.length, 2);
+  miniBtns[0].props.onClick({ stopPropagation() {} });
+  assert.deepEqual(resolved[0], {
+    kind: 'preference',
+    id: 'shortcuts',
+    direction: 'push',
+    profile: 'general',
+  });
+});
+
+test('CloudSyncModal：「快捷键配置」与「快捷模型配置」独立展示且默认不勾选', () => {
+  const react = makeStatefulReact();
+  const { CloudSyncModal } = loadSettingsComponents(react);
+  const props = makeModalProps({
+    cloudSync: {
+      enabled: true,
+      profile: 'general',
+      selectedItems: ['ui-theme'],
+      selectedPlugins: ['dsh-au'],
+    },
+  });
+
+  let tree = renderComponent(CloudSyncModal, props, react);
+  let cards = findAll(tree, (n) => hasClass(n, 'dsh-au-cs-group-card'));
+  const shortcutCard = cards[3];
+  assert.match(textOf(shortcutCard), /快捷操作/);
+  assert.match(textOf(shortcutCard), /仅单机备份/);
+
+  // 点击展开「快捷操作」
+  const shortcutTop = findAll(shortcutCard, (n) => hasClass(n, 'dsh-au-cs-group-top'))[0];
+  shortcutTop.props.onClick();
   tree = renderComponent(CloudSyncModal, props, react);
-  const pluginRows = findAll(tree, (n) => hasClass(n, 'dsh-au-cloud-sync-item'));
-  assert.equal(pluginRows.length, 2);
-  assert.equal(findAll(pluginRows[0], (n) => hasClass(n, 'dsh-au-cloud-sync-diff-badge') && hasClass(n, 'is-diff')).length, 1);
-  assert.equal(findAll(pluginRows[0], (n) => hasClass(n, 'dsh-au-cloud-sync-mini-btn')).length, 2);
-  assert.equal(findAll(pluginRows[1], (n) => hasClass(n, 'dsh-au-cloud-sync-diff-badge')).length, 0);
-  assert.equal(findAll(pluginRows[1], (n) => hasClass(n, 'dsh-au-cloud-sync-mini-btn')).length, 0);
+  cards = findAll(tree, (n) => hasClass(n, 'dsh-au-cs-group-card'));
+  const chips = findAll(cards[3], (n) => hasClass(n, 'dsh-au-cs-chip'));
+  assert.equal(chips.length, 2);
+  assert.match(textOf(chips[0]), /快捷键配置/);
+  assert.match(textOf(chips[0]), /shortcuts/);
+  assert.match(textOf(chips[1]), /快捷模型配置/);
+  assert.match(textOf(chips[1]), /modelShortcuts/);
+  assert.equal(chips[0].props['aria-checked'], false);
+  assert.equal(chips[1].props['aria-checked'], false);
 });
 
 test('CloudSyncFeatureGroup：设置页外层「待同步」计数仅统计已勾选项与固定同步的 dsh-au', () => {
-  // 预置 CloudSyncFeatureGroup 内部的 useState 槽位（顺序与组件内声明一致）
   const initialStates = [
     [{ id: 'general', label: '通用' }], // profileOptions
     {
@@ -255,8 +392,8 @@ test('CloudSyncFeatureGroup：设置页外层「待同步」计数仅统计已�
       { id: 'plugin-b', title: '插件B', inSync: false }, // 未勾选
     ], // pluginItems
     [
-      { id: 'shortcuts', title: '快捷键', inSync: true },
-      { id: 'model-shortcuts', title: '模型槽位', inSync: false }, // 未勾选
+      { id: 'shortcuts', title: '快捷键配置', inSync: true },
+      { id: 'modelShortcuts', title: '快捷模型配置', inSync: false }, // 未勾选
     ], // preferenceItems
     'test-machine', // machineId
     '', // syncRepoRoot
@@ -272,49 +409,6 @@ test('CloudSyncFeatureGroup：设置页外层「待同步」计数仅统计已�
   const tree = renderComponent(CloudSyncFeatureGroup, {}, react);
   const outerBadges = findAll(tree, (n) => String(n.props?.className || '').includes('dsh-au-cloud-sync-outer-diff'));
   assert.equal(outerBadges.length, 1);
-  // 仅计入：ui-theme(1) + dsh-au(1) + plugin-a(1) = 3 项待同步（不含 ui-chat、plugin-b、model-shortcuts）
+  // 仅计入：ui-theme(1) + dsh-au(1) + plugin-a(1) = 3 项待同步（不含 ui-chat、plugin-b、modelShortcuts）
   assert.equal(textOf(outerBadges[0]), '3 项待同步');
-});
-
-test('CloudSyncModal：未提供 selectedPreferences 时默认全不勾选，且 dsh-au 设置页签文案准确反映共享与单机备份规则', () => {
-  const react = makeStatefulReact();
-  const { CloudSyncModal } = loadSettingsComponents(react);
-  const props = makeModalProps({
-    cloudSync: {
-      enabled: true,
-      profile: 'general',
-      selectedItems: ['ui-theme'],
-      selectedPlugins: ['dsh-au'],
-      syncPluginConfigs: ['dsh-au'],
-    },
-  });
-
-  let tree = renderComponent(CloudSyncModal, props, react);
-  let tabs = findAll(tree, (n) => n.type === 'button' && n.props?.role === 'tab');
-  tabs[1].props.onClick();
-  tree = renderComponent(CloudSyncModal, props, react);
-
-  const modalText = textOf(tree);
-  assert.match(modalText, /所有电脑共用（修改后自动同步到云）/);
-  assert.match(modalText, /默认单机备份（勾选后多台电脑云端共享自动同步）/);
-
-  const checkboxes = findAll(tree, (n) => n.type === 'input' && n.props?.type === 'checkbox');
-  assert.equal(checkboxes.length, 2);
-  assert.equal(checkboxes[0].props.checked, false);
-  assert.equal(checkboxes[1].props.checked, false);
-});
-
-test('CloudSyncModal：「官方设置」与「其它云插件」页签顶部说明包含默认单机备份与明文密钥拦截提示', () => {
-  const react = makeStatefulReact();
-  const { CloudSyncModal } = loadSettingsComponents(react);
-  const props = makeModalProps();
-  const expectedPhrase = '未勾选时默认单机备份进私人仓库（自动拦截明文密钥），勾选后升级为多台电脑云端共享自动同步';
-
-  let tree = renderComponent(CloudSyncModal, props, react);
-  assert.ok(textOf(tree).includes(expectedPhrase), '官方设置页签顶部应包含单机备份与明文拦截说明');
-
-  const tabs = findAll(tree, (n) => n.type === 'button' && n.props?.role === 'tab');
-  tabs[2].props.onClick();
-  tree = renderComponent(CloudSyncModal, props, react);
-  assert.ok(textOf(tree).includes(expectedPhrase), '其它云插件页签顶部应包含单机备份与明文拦截说明');
 });

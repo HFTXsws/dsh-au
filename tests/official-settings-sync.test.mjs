@@ -279,53 +279,45 @@ test('dsh-restore.mjs --auto-sync：开关关闭时跳过，开启且自定义�
   assert.ok(updatedAuConfig.cloudSync.lastSyncedAt);
 });
 
-test('设置页包含云端配置自动同步开关、选择同步项独立弹窗及 4 个 API 动作，主按钮与模型方案选择器样式正确', () => {
+test('设置页包含云端配置自动同步开关、极简单页同步弹窗及 4 个 API 动作，主按钮与模型方案选择器样式正确', () => {
   const client = readFileSync(new URL('../client/client.js', import.meta.url), 'utf8');
   assert.match(client, /callApi\('getCloudSyncSettings'\)/);
   assert.match(client, /callApi\('saveCloudSyncSettings'/);
   assert.match(client, /路径已更改，请重启 DSH 后生效/);
   assert.match(client, /callApi\('runCloudSyncNow'/);
   assert.match(client, /callApi\('pushCloudSyncToRepo'/);
-  assert.match(client, /自定义云端同步设置项/);
+  assert.match(client, /云端同步设置/);
   assert.match(client, /选择同步项/);
   assert.doesNotMatch(client, /选择同步项 \(设置/);
   assert.match(client, /dsh-au-cloud-sync-action/);
   assert.match(client, /dsh-au-cloud-sync-status/);
   assert.match(client, /模型方案：/);
-  // dsh-au 设置页签分两组：所有电脑共用与单机备份/云端共享选项。
-  assert.match(client, /所有电脑共用/);
+  // 单页 4 卡片结构：DSH 官方配置（纯开关）、模型配置（5 项明细）、其它云插件、快捷操作（快捷键配置 / 快捷模型配置）。
+  assert.match(client, /DSH 官方配置/);
+  assert.match(client, /模型配置/);
+  assert.match(client, /其它云插件/);
+  assert.match(client, /快捷操作/);
   assert.match(client, /selectedPreferences/);
-  assert.match(client, /设备 \/ 页面切换快捷键/);
-  assert.match(client, /模型快捷槽位/);
-  // 方案 H：官方设置逐项一行，名称对齐 DSH 官方叫法，展开后切换和云端 / 官方默认比。
-  assert.match(client, /模型提供商、目录与默认模型/);
-  // 方案 G：展开后四列对照。
-  assert.match(client, /官方默认/);
-  assert.match(client, /is-cloud-diff/);
-  assert.match(client, /未分类的官方设置/);
+  assert.match(client, /快捷键配置/);
+  assert.match(client, /快捷模型配置/);
+  assert.match(client, /Claude 启动器与 4 档位映射/);
   assert.match(client, /Codex 模型目录/);
-  assert.match(client, /同步完整与精简目录，不切换当前模型/);
+  assert.match(client, /dsh-au 基础开关默认全机共享/);
   assert.match(client, /\.dsh-au-btn-primary\s*\{\s*background:#2563eb !important;/);
   assert.doesNotMatch(client, /\.dsh-au-btn-primary\s*\{[^}]*var\(--dsw-alias-brand-primary/);
-  assert.match(client, /展开对比/);
-  assert.match(client, /官方默认/);
-  assert.match(client, /云端「/);
-  assert.match(client, /DSH 官方设置/);
-  // 页签拆成三个：官方设置 / dsh-au 设置 / 其它云插件，dsh-au 不再出现在插件勾选列表。
-  assert.match(client, /'dsh-au 设置'/);
-  assert.match(client, /其它云插件 \(/);
+  assert.match(client, /dsh-au-cs-diff-item\s*\{[^}]*flex-shrink:\s*0;/);
+  assert.match(client, /singleItemOnly/);
+  assert.match(client, /dshAuPrefsOnly/);
   assert.match(client, /首次从云端拉取配置/);
-  assert.match(client, /实时同步已开启/);
+  assert.match(client, /已与云端保持一致/);
   assert.match(client, /\.dsh-au-cloud-sync-list\s*\{[^}]*min-height:0;/);
   assert.match(client, /\.dsh-au-cloud-sync-item\s*\{\s*flex-shrink:0;/);
-  assert.match(client, /配置快捷键/);
-  assert.match(client, /配置快捷模型/);
   assert.match(client, /h\(TodoFeatureGroup\),\s*h\(MobileFeatureGroup\),\s*h\(WindowMemoryFeatureGroup\)/);
   assert.match(client, /h\(FullAccessFeatureGroup\),\s*h\(GoalCreationFeatureGroup\),\s*h\(AutoContinueFeatureGroup\)/);
   assert.match(client, /h\(ShortcutSettingsSection\),\s*h\(ModelShortcutSettingsSection\)/);
   assert.match(client, /id: 'sync'[\s\S]*h\(CloudSyncFeatureGroup\)/);
-  // 原 general-settings 拆成 4 个配置块，共 8 个固定同步项。
-  assert.equal(OFFICIAL_SYNC_ITEMS.length, 8);
+  // 原 general-settings 拆成 4 个、llm-providers 拆成 5 个，共 12 个固定同步项。
+  assert.equal(OFFICIAL_SYNC_ITEMS.length, 12);
   assert.ok(OFFICIAL_SYNC_ITEMS.every((item) => Array.isArray(item.comparisons) && item.comparisons.length > 0));
 });
 
@@ -741,18 +733,19 @@ test('buildOfficialSyncItems：能准确识别官方设置与桌面偏好的本�
   // 1b. 行内数组仅括号内空格不同（`[ text, image ]` vs `[text, image]`）仍判一致
   writeFileSync(path.join(profileDir, 'cordis.patch.yml'), localPatchMatch.replace('providers: []', 'providers: [ ]'));
   const spaced = Object.fromEntries(buildOfficialSyncItems({ repoRoot, dshHome, profile: 'kiro' }).map((i) => [i.id, i]));
-  assert.equal(spaced['llm-providers'].inSync, true);
+  assert.equal(spaced['llm-pi-ai'].inSync, true);
   writeFileSync(path.join(profileDir, 'cordis.patch.yml'), localPatchMatch);
 
-  // 2. 本地改了默认模型与桌面偏好：应检出 llm-providers 与 desktop-preferences 不一致
+  // 2. 本地改了默认模型与桌面偏好：应检出 agent-default-model 与 desktop-preferences 不一致
   writeFileSync(path.join(profileDir, 'cordis.patch.yml'), localPatchMatch.replace('provider: acp-cursor', 'provider: kiro'));
   writeFileSync(path.join(dshHome, 'desktop-preferences.json'), JSON.stringify({ closeToTray: false, lanAccess: 'lan' }));
 
   const byProfile = buildOfficialSyncItemsByProfile({ repoRoot, dshHome });
   const kiroItems = Object.fromEntries(byProfile.kiro.map((i) => [i.id, i]));
   assert.equal(kiroItems['ui-theme'].inSync, true);
-  assert.equal(kiroItems['llm-providers'].inSync, false);
-  assert.deepEqual(kiroItems['llm-providers'].diffDetails, ['agent-default-model']);
+  assert.equal(kiroItems['llm-pi-ai'].inSync, true);
+  assert.equal(kiroItems['agent-default-model'].inSync, false);
+  assert.deepEqual(kiroItems['agent-default-model'].diffDetails, ['agent-default-model']);
   assert.equal(kiroItems['desktop-preferences'].inSync, false);
   assert.deepEqual(kiroItems['desktop-preferences'].diffDetails, ['closeToTray']);
 });
@@ -1599,7 +1592,9 @@ test('acpFallback 与 restoreScript / desktopPreferencesFile：严格按清单�
     profiles: [{ id: 'no-fallback', label: 'NoFallback', file: 'custom/patch.yml', selectable: true }],
   });
   const items = Object.fromEntries(buildOfficialSyncItems({ repoRoot, dshHome, profile: 'no-fallback' }).map((i) => [i.id, i]));
-  assert.equal(items['llm-providers'].inSync, true);
+  assert.equal(items['llm-pi-ai'].inSync, true);
+  assert.equal(items['agent-default-model'].inSync, true);
+  assert.equal(items['dsh-acp-adapter'].inSync, true);
 
   // syncOfficialDesktopPreferences 与 runRestoreScriptForCloudSync 均按清单路径读取。
   const prefRes = syncOfficialDesktopPreferences({ repoRoot, dshHome, enabled: true });
@@ -2044,7 +2039,8 @@ test('backupUncheckedSettingsToMachine：未勾选官方设置与云插件默认
   assert.equal(res1.ok, true);
   assert.equal(res1.changed, true);
   assert.ok(res1.backedUpItems.includes('desktop-preferences'));
-  assert.ok(res1.backedUpItems.includes('llm-providers'));
+  assert.ok(res1.backedUpItems.includes('llm-pi-ai'));
+  assert.ok(res1.backedUpItems.includes('codex-catalog'));
   assert.ok(!res1.backedUpItems.includes('ui-theme'));
   assert.ok(!res1.backedUpItems.includes('permission-preset'));
   assert.deepEqual(res1.backedUpPlugins, ['safe-plugin']);
@@ -2068,8 +2064,8 @@ test('backupUncheckedSettingsToMachine：未勾选官方设置与云插件默认
   const backupView = loadMachineSettingsBackup('mac-a');
   if (backupView.officialSettingsBackup || backupView.pluginConfigs) {
     assert.ok(backupView.officialSettingsBackup['desktop-preferences']?.desktopPreferences);
-    assert.ok(backupView.officialSettingsBackup['llm-providers']?.cordisBlocks?.['llm-pi-ai']);
-    assert.ok(backupView.officialSettingsBackup['llm-providers']?.watchedFiles?.['codex/gateway-models.json']);
+    assert.ok(backupView.officialSettingsBackup['llm-pi-ai']?.cordisBlocks?.['llm-pi-ai']);
+    assert.ok(backupView.officialSettingsBackup['codex-catalog']?.watchedFiles?.['codex/gateway-models.json']);
     assert.match(backupView.pluginConfigs['safe-plugin'], /localhost:3000/);
   } else {
     assert.ok(rawMachine);
