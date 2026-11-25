@@ -408,6 +408,13 @@
             max-width: 0 !important;
             pointer-events: none !important;
           }
+          /* 手机访问 DSH 时隐藏远程 DSH 侧边工作区挂载，仅保留本机与侧载扩展（如 Claude） */
+          html[${MOBILE_ATTR}="true"] [class*="_groupSection"]:has([data-row-key^="workspace:dsh-au-remote-ws:"]),
+          html[${MOBILE_ATTR}="true"] [data-dsh-au-device-group-header="1"][data-dsh-au-group-key^="remote:"],
+          html[${MOBILE_ATTR}="true"] .dsh-au-remote-ws-root,
+          html[${MOBILE_ATTR}="true"] [data-dsh-au-remote-workspaces="1"] {
+            display: none !important;
+          }
           .dsh-au-mobile-trigger {
             position: fixed;
             z-index: 9490;
