@@ -10,6 +10,7 @@ import {
   ALL_OFFICIAL_SYNC_ITEM_IDS,
   OFFICIAL_SYNC_ITEMS,
   applySelectedOfficialPatchBlocks,
+  areSelectedSyncItemsInSync,
   buildOfficialSyncItems,
   buildOfficialSyncItemsByProfile,
   buildPreferenceSyncItems,
@@ -20,9 +21,12 @@ import {
   getSelectableDshProfiles,
   loadDshProfilesManifest,
   normalizeCloudSyncConfig,
+  normalizeLocalPatchPaths,
   getAllCloudPluginIds,
   pushLocalOfficialSettingsToRepo,
+  resolveDshProfilesManifestPath,
   resolveRepoProfilePatchPath,
+  runRestoreScriptForCloudSync,
   syncOfficialDesktopPreferences,
   syncOfficialDshAuPreferences,
 } from '../lib/official-settings-sync.js';
@@ -34,9 +38,51 @@ import {
   upsertCloudPlugin,
 } from '../lib/cloud-manifest.js';
 import { writePluginBundle } from '../lib/plugin-bundles.js';
+import { loadMachinePreferences, saveMachinePreferences } from '../lib/local-bindings.js';
+import { readModelShortcuts } from '../lib/model-shortcuts.js';
 import { copyRestoreMock, makeTempSyncRepo, useTempSyncRepo } from './helpers/temp-sync-repo.mjs';
 
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+/** 为临时仓库写入合法的声明式 dsh-profiles.json，按仓库实际 sync 布局放置。 */
+function writeTestProfilesManifest(repoRoot, overrides = {}) {
+  const legacyDir = path.join(repoRoot, 'dsh-au', 'sync', 'cloud');
+  const modernDir = path.join(repoRoot, 'dsh-sync', 'cloud');
+  const cloudDir = existsSync(path.join(repoRoot, 'dsh-au')) && !existsSync(path.join(repoRoot, 'dsh-sync'))
+    ? legacyDir
+    : modernDir;
+  mkdirSync(cloudDir, { recursive: true });
+  const payload = {
+    schemaVersion: 2,
+    defaultProfile: 'kiro',
+    restoreScript: 'scripts/dsh-restore.mjs',
+    desktopPreferencesFile: 'app-config/dsh/desktop-preferences.json',
+    pathNormalizations: [
+      {
+        pattern: '[A-Za-z]:\\\\\\\\[^\\n"]*?cursor-acp-wrapper\\.mjs|/[^\\n"]*?cursor-acp-wrapper\\.mjs',
+        replacement: '~/.dsh/cursor-acp-wrapper.mjs',
+      },
+      {
+        pattern: '[A-Za-z]:\\\\\\\\[^\\n"]*?antigravity-acp-wrapper\\.mjs|/[^\\n"]*?antigravity-acp-wrapper\\.mjs',
+        replacement: '~/.dsh/antigravity-acp-wrapper.mjs',
+      },
+    ],
+    watchedFiles: [
+      'app-config/codex/gateway-models.json',
+      'app-config/codex/gateway-presets.json',
+      'app-config/claude/kiro-gateway.json',
+      'app-config/claude/antigravity-gateway.json',
+      'app-config/claude/gbu-gateway.json',
+    ],
+    profiles: [
+      { id: 'kiro', label: 'Kiro', file: 'app-config/dsh/cordis.patch.kiro.yml', selectable: true },
+      { id: 'generic', label: 'Generic', file: 'app-config/dsh/cordis.patch.generic.yml', selectable: true },
+      { id: 'local', label: 'Local', file: 'app-config/dsh/cordis.patch.local.yml', selectable: true },
+    ],
+    ...overrides,
+  };
+  writeFileSync(path.join(cloudDir, 'dsh-profiles.json'), `${JSON.stringify(payload, null, 2)}\n`);
+}
 
 test('normalizeCloudSyncConfig：默认关闭自动同步、默认全选官方设置，自定义勾选后保留合法项且未知方案回退默认 general', () => {
   const def = normalizeCloudSyncConfig(undefined);
@@ -85,6 +131,7 @@ test('computeOfficialSettingsHash：仅模型目录变化也会触发自动同�
   writeFileSync(path.join(codexDir, 'gateway-presets.json'), '{"catalogs":[]}\n');
   const modelPath = path.join(codexDir, 'gateway-models.json');
   writeFileSync(modelPath, '{"models":[{"slug":"a"}]}\n');
+  writeTestProfilesManifest(repoRoot, { defaultProfile: 'generic' });
 
   const before = computeOfficialSettingsHash(repoRoot, 'generic');
   writeFileSync(modelPath, '{"models":[{"slug":"a"},{"slug":"b"}]}\n');
@@ -135,6 +182,7 @@ test('applySelectedOfficialPatchBlocks：仅同步已勾选的官方设置块，
 test('dsh-restore.mjs --auto-sync：开关关闭时跳过，开启且自定义勾选时仅还原勾选的设置项', (t) => {
   const { root: syncRepoRoot } = useTempSyncRepo(t, 'dsh-official-restore-');
   copyRestoreMock(syncRepoRoot);
+  writeTestProfilesManifest(syncRepoRoot, { defaultProfile: 'kiro' });
   writeFileSync(path.join(syncRepoRoot, 'app-config', 'dsh', 'cordis.patch.kiro.yml'), [
     '- id: ui-theme',
     '  config:',
@@ -303,6 +351,7 @@ test('pushLocalOfficialSettingsToRepo：通用设置同步写入全部方案，�
 
   writeFileSync(path.join(repoDshDir, 'cordis.patch.kiro.yml'), baseRepoPatch('kiro-old'));
   writeFileSync(path.join(repoDshDir, 'cordis.patch.generic.yml'), baseRepoPatch('generic-old'));
+  writeTestProfilesManifest(path.join(tempRoot, 'repo'));
   writeFileSync(
     path.join(localProfileDir, 'cordis.patch.yml'),
     [
@@ -343,6 +392,7 @@ test('勾选 dsh-au 时，pushLocalOfficialSettingsToRepo 与 syncOfficialDshAuP
   mkdirSync(path.join(repoRoot, 'dsh-au', 'sync', 'cloud'), { recursive: true });
   mkdirSync(path.join(dshHomeA, 'profiles', 'desktop'), { recursive: true });
   mkdirSync(path.join(dshHomeB, 'profiles', 'desktop'), { recursive: true });
+  writeTestProfilesManifest(repoRoot);
 
   // 电脑 A 开启新建目标限制、移动端适配、默认完全权限，并自定义快捷键。
   writeFileSync(
@@ -437,6 +487,7 @@ test('pushLocalOfficialSettingsToRepo：本机卸载云插件后推云清理清�
   const profileDir = path.join(dshHome, 'profiles', 'desktop');
   mkdirSync(repoRoot, { recursive: true });
   mkdirSync(profileDir, { recursive: true });
+  writeTestProfilesManifest(repoRoot);
 
   const stalePlugin = { id: 'stale-plugin', name: 'Stale Plugin', package: '@scope/stale-plugin', source: 'npm', version: '1.0.0' };
   const keepPlugin = { id: 'keep-plugin', name: 'Keep Plugin', package: 'keep-plugin', source: 'npm', version: '1.0.0' };
@@ -566,6 +617,7 @@ test('pushLocalOfficialSettingsToRepo：dsh-sync 布局写入 cloud/dsh-au-prefe
   const dshHome = path.join(tempRoot, 'dshHome');
   mkdirSync(path.join(repoRoot, 'dsh-sync', 'cloud'), { recursive: true });
   mkdirSync(dshHome, { recursive: true });
+  writeTestProfilesManifest(repoRoot);
   writeFileSync(path.join(dshHome, 'dsh-au.config.json'), JSON.stringify({
     features: { todo: false, fullAccessByDefault: true, blockGoalCreation: true, disconnectRemotesOnLock: true, sidebarExtensions: { grokbot: false } },
   }));
@@ -667,6 +719,7 @@ test('buildOfficialSyncItems：能准确识别官方设置与桌面偏好的本�
     writeFileSync(path.join(repoDshDir, `cordis.patch.${p}.yml`), cloudPatch);
   }
   writeFileSync(path.join(repoDshDir, 'desktop-preferences.json'), JSON.stringify({ closeToTray: true, lanAccess: 'lan' }));
+  writeTestProfilesManifest(repoRoot);
 
   // 1. 本地与云完全一致（包含不同家目录路径写法）
   const localPatchMatch = cloudPatch
@@ -736,6 +789,7 @@ test('buildPreferenceSyncItems：能准确检测本机快捷键与模型快捷�
   // 先推送到机器云备份 -> 两项均应与云一致
   const repoRoot = path.join(tempRoot, 'repo');
   mkdirSync(repoRoot, { recursive: true });
+  writeTestProfilesManifest(repoRoot);
   pushLocalOfficialSettingsToRepo({
     repoRoot,
     dshHome,
@@ -774,6 +828,7 @@ test('pushLocalOfficialSettingsToRepo：跳过含明文凭据的 patch 块，允
   const profileDir = path.join(dshHome, 'profiles', 'desktop');
   mkdirSync(appCfgDir, { recursive: true });
   mkdirSync(profileDir, { recursive: true });
+  writeTestProfilesManifest(repoRoot);
 
   for (const profile of ['kiro', 'generic', 'local']) {
     writeFileSync(
@@ -1082,6 +1137,520 @@ test('findOutdatedCloudPlugins 能识别版本落后于云端的托管插件与�
   const client = readFileSync(new URL('../client/client.js', import.meta.url), 'utf8');
   assert.match(client, /startupCloudSyncNotice/);
   assert.match(client, /dismissStartupCloudSyncNotice/);
+});
+
+test('computeOfficialSettingsHash 与 computeLocalOfficialSettingsHash：纳入已勾选本机偏好且保持旧签名兼容', (t) => {
+  const tempRoot = mkdtempSync(path.join(tmpdir(), 'dsh-pref-hash-'));
+  const prevEnv = {
+    DSH_HOME: process.env.DSH_HOME,
+    DSH_AU_CONFIG_PATH: process.env.DSH_AU_CONFIG_PATH,
+    DSH_AU_MODEL_SHORTCUTS_PATH: process.env.DSH_AU_MODEL_SHORTCUTS_PATH,
+    DSH_AU_SYNC_REPO: process.env.DSH_AU_SYNC_REPO,
+    DSH_AU_CLOUD_MANIFEST_PATH: process.env.DSH_AU_CLOUD_MANIFEST_PATH,
+    DSH_AU_MACHINE_ID: process.env.DSH_AU_MACHINE_ID,
+    DSH_AU_MACHINES_DIR: process.env.DSH_AU_MACHINES_DIR,
+  };
+  t.after(() => {
+    for (const [k, v] of Object.entries(prevEnv)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    rmSync(tempRoot, { recursive: true, force: true });
+  });
+
+  const repoRoot = path.join(tempRoot, 'repo');
+  const dshHome = path.join(tempRoot, 'dshHome');
+  const machinesDir = path.join(repoRoot, 'dsh-sync', 'machines');
+  mkdirSync(path.join(repoRoot, 'app-config', 'dsh'), { recursive: true });
+  mkdirSync(path.join(repoRoot, 'dsh-sync', 'cloud'), { recursive: true });
+  mkdirSync(machinesDir, { recursive: true });
+  mkdirSync(dshHome, { recursive: true });
+  writeFileSync(path.join(repoRoot, 'app-config', 'dsh', 'cordis.patch.generic.yml'), '- id: ui-theme\n');
+  writeFileSync(path.join(repoRoot, 'app-config', 'dsh', 'desktop-preferences.json'), '{}\n');
+  writeFileSync(path.join(repoRoot, 'dsh-sync', 'cloud', 'plugins.json'), '{"schemaVersion":1,"plugins":[]}\n');
+  writeTestProfilesManifest(repoRoot, { defaultProfile: 'generic' });
+
+  const cfgPath = path.join(dshHome, 'dsh-au.config.json');
+  const modelShortcutsPath = path.join(dshHome, 'model-shortcuts.json');
+  process.env.DSH_HOME = dshHome;
+  process.env.DSH_AU_CONFIG_PATH = cfgPath;
+  process.env.DSH_AU_MODEL_SHORTCUTS_PATH = modelShortcutsPath;
+  process.env.DSH_AU_SYNC_REPO = repoRoot;
+  process.env.DSH_AU_CLOUD_MANIFEST_PATH = path.join(repoRoot, 'dsh-sync', 'cloud', 'plugins.json');
+  process.env.DSH_AU_MACHINE_ID = 'pref-hash-pc';
+  process.env.DSH_AU_MACHINES_DIR = machinesDir;
+
+  writeFileSync(cfgPath, JSON.stringify({
+    cloudSync: { lastSyncedHash: 'old', lastLocalHash: 'old' },
+    clientPreferences: {
+      shortcutOverrides: { 'todo.toggle': { code: 'KeyT', ctrl: true, alt: true, shift: false, meta: false } },
+    },
+  }));
+  writeFileSync(modelShortcutsPath, JSON.stringify({
+    schemaVersion: 1,
+    enabled: true,
+    binding: { code: 'KeyM', ctrl: false, alt: true, shift: false, meta: false },
+    slots: [{ provider: 'kiro', model: 'kiro-claude-opus-5-5' }, null, null, null, null, null, null, null, null],
+  }));
+
+  // 1. 不传 selectedPreferences 时，本机偏好变动不影响旧口径哈希
+  const legacyCloudBefore = computeOfficialSettingsHash(repoRoot, 'generic');
+  const legacyLocalBefore = computeLocalOfficialSettingsHash({ dshHome, selectedItems: [] });
+
+  // 2. 传入 selectedPreferences 后，修改 modelShortcuts 或 shortcutOverrides 会立即反映到哈希
+  const prefOpts = ['modelShortcuts', 'shortcuts'];
+  const localHash1 = computeLocalOfficialSettingsHash({
+    dshHome,
+    selectedItems: [],
+    selectedPreferences: prefOpts,
+  });
+
+  // 仅更新 dsh-au.config.json 的 lastSyncedHash 元数据，不应改变本机偏好哈希（避免死循环）
+  const cfgObj = JSON.parse(readFileSync(cfgPath, 'utf8'));
+  cfgObj.cloudSync.lastSyncedHash = 'changed-meta';
+  writeFileSync(cfgPath, JSON.stringify(cfgObj));
+  assert.equal(
+    computeLocalOfficialSettingsHash({ dshHome, selectedItems: [], selectedPreferences: prefOpts }),
+    localHash1,
+  );
+
+  // 修改 model-shortcuts.json 后哈希变化
+  writeFileSync(modelShortcutsPath, JSON.stringify({
+    schemaVersion: 1,
+    enabled: true,
+    binding: { code: 'KeyM', ctrl: false, alt: true, shift: false, meta: false },
+    slots: [{ provider: 'gbu', model: 'gpt-5' }, null, null, null, null, null, null, null, null],
+  }));
+  const localHash2 = computeLocalOfficialSettingsHash({
+    dshHome,
+    selectedItems: [],
+    selectedPreferences: prefOpts,
+  });
+  assert.notEqual(localHash2, localHash1);
+
+  // 推送后，返回的 hash 应与传入 selectedPreferences 的云端哈希一致
+  const pushed = pushLocalOfficialSettingsToRepo({
+    repoRoot,
+    dshHome,
+    profile: 'generic',
+    selectedItems: [],
+    selectedPlugins: [],
+    selectedPreferences: prefOpts,
+  });
+  assert.equal(pushed.machinePreferencesUpdated, true);
+  assert.equal(
+    pushed.hash,
+    computeOfficialSettingsHash(repoRoot, 'generic', { selectedPreferences: prefOpts }),
+  );
+  assert.equal(computeOfficialSettingsHash(repoRoot, 'generic'), legacyCloudBefore);
+  assert.equal(computeLocalOfficialSettingsHash({ dshHome, selectedItems: [] }), legacyLocalBefore);
+});
+
+test('重启双向比对防覆盖保护：仅本机改 modelShortcuts 推云、仅云端改拉回、双端改判 conflict', (t) => {
+  const tempRoot = mkdtempSync(path.join(tmpdir(), 'dsh-pref-startup-'));
+  const prevEnv = {
+    DSH_HOME: process.env.DSH_HOME,
+    DSH_AU_CONFIG_PATH: process.env.DSH_AU_CONFIG_PATH,
+    DSH_AU_MODEL_SHORTCUTS_PATH: process.env.DSH_AU_MODEL_SHORTCUTS_PATH,
+    DSH_AU_SYNC_REPO: process.env.DSH_AU_SYNC_REPO,
+    DSH_AU_CLOUD_MANIFEST_PATH: process.env.DSH_AU_CLOUD_MANIFEST_PATH,
+    DSH_AU_MACHINE_ID: process.env.DSH_AU_MACHINE_ID,
+    DSH_AU_MACHINES_DIR: process.env.DSH_AU_MACHINES_DIR,
+  };
+  t.after(() => {
+    for (const [k, v] of Object.entries(prevEnv)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    rmSync(tempRoot, { recursive: true, force: true });
+  });
+
+  const repoRoot = path.join(tempRoot, 'repo');
+  const dshHome = path.join(tempRoot, 'dshHome');
+  const machinesDir = path.join(repoRoot, 'dsh-sync', 'machines');
+  mkdirSync(path.join(repoRoot, 'app-config', 'dsh'), { recursive: true });
+  mkdirSync(path.join(repoRoot, 'dsh-sync', 'cloud'), { recursive: true });
+  mkdirSync(machinesDir, { recursive: true });
+  mkdirSync(dshHome, { recursive: true });
+  writeFileSync(path.join(repoRoot, 'app-config', 'dsh', 'cordis.patch.generic.yml'), '- id: ui-theme\n');
+  writeFileSync(path.join(repoRoot, 'app-config', 'dsh', 'desktop-preferences.json'), '{}\n');
+  writeFileSync(path.join(repoRoot, 'dsh-sync', 'cloud', 'plugins.json'), '{"schemaVersion":1,"plugins":[]}\n');
+  writeTestProfilesManifest(repoRoot, { defaultProfile: 'generic' });
+
+  const cfgPath = path.join(dshHome, 'dsh-au.config.json');
+  const modelShortcutsPath = path.join(dshHome, 'model-shortcuts.json');
+  process.env.DSH_HOME = dshHome;
+  process.env.DSH_AU_CONFIG_PATH = cfgPath;
+  process.env.DSH_AU_MODEL_SHORTCUTS_PATH = modelShortcutsPath;
+  process.env.DSH_AU_SYNC_REPO = repoRoot;
+  process.env.DSH_AU_CLOUD_MANIFEST_PATH = path.join(repoRoot, 'dsh-sync', 'cloud', 'plugins.json');
+  process.env.DSH_AU_MACHINE_ID = 'startup-guard-pc';
+  process.env.DSH_AU_MACHINES_DIR = machinesDir;
+
+  const selectedPreferences = ['modelShortcuts', 'shortcuts'];
+  const initialSlots = [{ provider: 'kiro', model: 'kiro-claude-opus-5-5' }, null, null, null, null, null, null, null, null];
+  writeFileSync(cfgPath, JSON.stringify({ clientPreferences: { shortcutOverrides: {} } }));
+  writeFileSync(modelShortcutsPath, JSON.stringify({
+    schemaVersion: 1,
+    enabled: true,
+    binding: { code: 'KeyM', ctrl: false, alt: true, shift: false, meta: false },
+    slots: initialSlots,
+  }));
+
+  // 建立初始双基线
+  const basePush = pushLocalOfficialSettingsToRepo({
+    repoRoot,
+    dshHome,
+    profile: 'generic',
+    selectedItems: [],
+    selectedPlugins: [],
+    selectedPreferences,
+  });
+  let lastSyncedHash = basePush.hash;
+  let lastLocalHash = computeLocalOfficialSettingsHash({ dshHome, selectedItems: [], selectedPreferences });
+
+  // 场景 1：仅本机修改 modelShortcuts（云备份未变）-> 判定 push，推云且不覆盖本机
+  const localEditedSlots = [{ provider: 'gbu', model: 'gpt-5' }, null, null, null, null, null, null, null, null];
+  writeFileSync(modelShortcutsPath, JSON.stringify({
+    schemaVersion: 1,
+    enabled: true,
+    binding: { code: 'KeyM', ctrl: false, alt: true, shift: false, meta: false },
+    slots: localEditedSlots,
+  }));
+  const d1 = decideStartupOfficialSyncAction({
+    cloudHash: computeOfficialSettingsHash(repoRoot, 'generic', { selectedPreferences }),
+    lastSyncedHash,
+    localHash: computeLocalOfficialSettingsHash({ dshHome, selectedItems: [], selectedPreferences }),
+    lastLocalHash,
+  });
+  assert.equal(d1.action, 'push');
+
+  const pushedAfterLocalEdit = pushLocalOfficialSettingsToRepo({
+    repoRoot,
+    dshHome,
+    profile: 'generic',
+    selectedItems: [],
+    selectedPlugins: [],
+    selectedPreferences,
+  });
+  assert.equal(loadMachinePreferences().modelShortcuts.slots[0].model, 'gpt-5');
+  assert.equal(readModelShortcuts({ filePath: modelShortcutsPath }).modelShortcuts.slots[0].model, 'gpt-5');
+  lastSyncedHash = pushedAfterLocalEdit.hash;
+  lastLocalHash = computeLocalOfficialSettingsHash({ dshHome, selectedItems: [], selectedPreferences });
+
+  // 场景 2：仅云备份变了（本机未改）-> 判定 pull，从云端拉回本机
+  const cloudUpdatedShortcuts = {
+    enabled: true,
+    binding: { code: 'KeyM', ctrl: false, alt: true, shift: false, meta: false },
+    slots: [{ provider: 'kiro', model: 'kiro-sonnet-4' }, null, null, null, null, null, null, null, null],
+  };
+  saveMachinePreferences({ modelShortcuts: cloudUpdatedShortcuts });
+  const d2 = decideStartupOfficialSyncAction({
+    cloudHash: computeOfficialSettingsHash(repoRoot, 'generic', { selectedPreferences }),
+    lastSyncedHash,
+    localHash: computeLocalOfficialSettingsHash({ dshHome, selectedItems: [], selectedPreferences }),
+    lastLocalHash,
+  });
+  assert.equal(d2.action, 'pull');
+  syncOfficialDshAuPreferences({ repoRoot, dshHome, enabled: true, preferences: selectedPreferences });
+  assert.equal(readModelShortcuts({ filePath: modelShortcutsPath }).modelShortcuts.slots[0].model, 'kiro-sonnet-4');
+  lastSyncedHash = computeOfficialSettingsHash(repoRoot, 'generic', { selectedPreferences });
+  lastLocalHash = computeLocalOfficialSettingsHash({ dshHome, selectedItems: [], selectedPreferences });
+
+  // 场景 3：本机与云备份同时变化 -> 判定 conflict，保留本机配置不覆盖
+  writeFileSync(modelShortcutsPath, JSON.stringify({
+    schemaVersion: 1,
+    enabled: true,
+    binding: { code: 'KeyM', ctrl: false, alt: true, shift: false, meta: false },
+    slots: [{ provider: 'local', model: 'local-only-model' }, null, null, null, null, null, null, null, null],
+  }));
+  saveMachinePreferences({
+    modelShortcuts: {
+      enabled: true,
+      binding: { code: 'KeyM', ctrl: false, alt: true, shift: false, meta: false },
+      slots: [{ provider: 'cloud', model: 'cloud-only-model' }, null, null, null, null, null, null, null, null],
+    },
+  });
+  const d3 = decideStartupOfficialSyncAction({
+    cloudHash: computeOfficialSettingsHash(repoRoot, 'generic', { selectedPreferences }),
+    lastSyncedHash,
+    localHash: computeLocalOfficialSettingsHash({ dshHome, selectedItems: [], selectedPreferences }),
+    lastLocalHash,
+  });
+  assert.equal(d3.action, 'conflict');
+  assert.equal(readModelShortcuts({ filePath: modelShortcutsPath }).modelShortcuts.slots[0].model, 'local-only-model');
+});
+
+test('lib/index.js：监听 model-shortcuts.json、在保存快捷模型/快捷键时触发防抖推送且推送传入 selectedPreferences', () => {
+  const indexSrc = readFileSync(new URL('../lib/index.js', import.meta.url), 'utf8');
+  assert.match(indexSrc, /!syncCfg\.selectedItems\.length && !syncCfg\.selectedPreferences\.length/);
+  assert.match(indexSrc, /selectedPreferences:\s*cfg\.cloudSync\.selectedPreferences/);
+  assert.match(indexSrc, /selectedPreferences:\s*syncCfg\.selectedPreferences/);
+  assert.match(indexSrc, /name === 'model-shortcuts\.json'/);
+  assert.doesNotMatch(indexSrc, /name === 'dsh-au\.config\.json'/);
+  assert.match(indexSrc, /saveModelShortcuts\(patch\);\s*scheduleRealtimeOfficialPush\(\)/);
+  assert.match(indexSrc, /shortcutOverrides[\s\S]*?scheduleRealtimeOfficialPush\(\)/);
+});
+
+test('声明式清单严格校验：缺少清单或无有效 profiles 时明确抛错，不扫描旧文件也不回退 app-config/dsh/profiles.json', (t) => {
+  const tempRoot = mkdtempSync(path.join(tmpdir(), 'dsh-manifest-strict-'));
+  const prevEnv = process.env.DSH_AU_PROFILES_MANIFEST_PATH;
+  t.after(() => {
+    if (prevEnv === undefined) delete process.env.DSH_AU_PROFILES_MANIFEST_PATH;
+    else process.env.DSH_AU_PROFILES_MANIFEST_PATH = prevEnv;
+    rmSync(tempRoot, { recursive: true, force: true });
+  });
+
+  const repoRoot = path.join(tempRoot, 'repo');
+  mkdirSync(path.join(repoRoot, 'app-config', 'dsh'), { recursive: true });
+  // 即使存在旧路径 app-config/dsh/profiles.json 和 cordis.patch.general.yml，也绝不回退读取。
+  writeFileSync(path.join(repoRoot, 'app-config', 'dsh', 'profiles.json'), JSON.stringify({
+    profiles: [{ id: 'legacy', label: 'legacy', file: 'app-config/dsh/cordis.patch.general.yml' }],
+  }));
+  writeFileSync(path.join(repoRoot, 'app-config', 'dsh', 'cordis.patch.general.yml'), '- id: ui-theme\n');
+
+  assert.equal(
+    resolveDshProfilesManifestPath(repoRoot),
+    path.join(repoRoot, 'dsh-sync', 'cloud', 'dsh-profiles.json'),
+  );
+  assert.throws(() => loadDshProfilesManifest(repoRoot), /DSH 方案清单缺失/);
+
+  // 写入空 profiles 的清单同样明确抛错。
+  const cloudDir = path.join(repoRoot, 'dsh-sync', 'cloud');
+  mkdirSync(cloudDir, { recursive: true });
+  writeFileSync(path.join(cloudDir, 'dsh-profiles.json'), JSON.stringify({ schemaVersion: 2, profiles: [] }));
+  assert.throws(() => loadDshProfilesManifest(repoRoot), /缺少有效的 profiles/);
+
+  // 环境变量 DSH_AU_PROFILES_MANIFEST_PATH 覆盖生效。
+  const customManifest = path.join(tempRoot, 'override-profiles.json');
+  writeFileSync(customManifest, JSON.stringify({
+    schemaVersion: 2,
+    defaultProfile: 'custom',
+    restoreScript: 'custom/restore.mjs',
+    desktopPreferencesFile: 'custom/desktop.json',
+    pathNormalizations: [{ pattern: '/tmp/foo', replacement: '~/foo' }],
+    watchedFiles: ['custom/watched.json'],
+    profiles: [{ id: 'custom', label: 'Custom', file: 'custom/patch.yml' }],
+  }));
+  process.env.DSH_AU_PROFILES_MANIFEST_PATH = customManifest;
+  assert.equal(resolveDshProfilesManifestPath(repoRoot), customManifest);
+  const loaded = loadDshProfilesManifest(repoRoot);
+  assert.equal(loaded.defaultProfile, 'custom');
+  assert.equal(loaded.restoreScript, 'custom/restore.mjs');
+  assert.equal(loaded.desktopPreferencesFile, 'custom/desktop.json');
+  assert.deepEqual(loaded.watchedFiles, ['custom/watched.json']);
+  assert.deepEqual(loaded.pathNormalizations, [{ pattern: '/tmp/foo', replacement: '~/foo' }]);
+});
+
+test('watchedFiles 声明式哈希：受监控文件改动会改变哈希，未声明文件改动不影响哈希', (t) => {
+  const tempRoot = mkdtempSync(path.join(tmpdir(), 'dsh-watched-files-'));
+  t.after(() => rmSync(tempRoot, { recursive: true, force: true }));
+
+  const repoRoot = path.join(tempRoot, 'repo');
+  mkdirSync(path.join(repoRoot, 'custom-dir'), { recursive: true });
+  writeFileSync(path.join(repoRoot, 'custom-dir', 'patch.yml'), '- id: ui-theme\n');
+  writeFileSync(path.join(repoRoot, 'custom-dir', 'desktop.json'), '{"closeToTray":true}\n');
+  const watchedFile = path.join(repoRoot, 'custom-dir', 'models.json');
+  const unwatchedFile = path.join(repoRoot, 'custom-dir', 'ignored.json');
+  writeFileSync(watchedFile, '{"v":1}\n');
+  writeFileSync(unwatchedFile, '{"v":1}\n');
+
+  writeTestProfilesManifest(repoRoot, {
+    defaultProfile: 'main',
+    desktopPreferencesFile: 'custom-dir/desktop.json',
+    watchedFiles: ['custom-dir/models.json'],
+    profiles: [{ id: 'main', label: 'Main', file: 'custom-dir/patch.yml', selectable: true }],
+  });
+
+  const h1 = computeOfficialSettingsHash(repoRoot, 'main');
+  writeFileSync(unwatchedFile, '{"v":2}\n');
+  assert.equal(computeOfficialSettingsHash(repoRoot, 'main'), h1);
+
+  writeFileSync(watchedFile, '{"v":2}\n');
+  const h2 = computeOfficialSettingsHash(repoRoot, 'main');
+  assert.notEqual(h2, h1);
+
+  // desktopPreferencesFile 改动同样触发哈希变更
+  writeFileSync(path.join(repoRoot, 'custom-dir', 'desktop.json'), '{"closeToTray":false}\n');
+  assert.notEqual(computeOfficialSettingsHash(repoRoot, 'main'), h2);
+});
+
+test('pathNormalizations 声明式归一化：computeLocalOfficialSettingsHash 与 pushLocalOfficialSettingsToRepo 按清单规则替换路径', (t) => {
+  const tempRoot = mkdtempSync(path.join(tmpdir(), 'dsh-path-norm-'));
+  t.after(() => rmSync(tempRoot, { recursive: true, force: true }));
+
+  const repoRoot = path.join(tempRoot, 'repo');
+  const dshHome = path.join(tempRoot, 'dshHome');
+  const profileDir = path.join(dshHome, 'profiles', 'desktop');
+  mkdirSync(path.join(repoRoot, 'custom'), { recursive: true });
+  mkdirSync(profileDir, { recursive: true });
+
+  writeTestProfilesManifest(repoRoot, {
+    defaultProfile: 'main',
+    desktopPreferencesFile: 'custom/desktop-prefs.json',
+    pathNormalizations: [
+      {
+        pattern: '[A-Za-z]:\\\\\\\\[^\\n"]*?my-custom-tool\\.mjs|/[^\\n"]*?my-custom-tool\\.mjs',
+        replacement: '~/.dsh/my-custom-tool.mjs',
+      },
+    ],
+    profiles: [{ id: 'main', label: 'Main', file: 'custom/patch.yml', selectable: true }],
+  });
+  writeFileSync(path.join(repoRoot, 'custom', 'patch.yml'), '- id: dsh-acp-adapter\n  config:\n    cmd: old\n');
+
+  const manifest = loadDshProfilesManifest(repoRoot);
+  assert.equal(
+    normalizeLocalPatchPaths('cmd: "C:\\\\Users\\\\alice\\\\.dsh\\\\my-custom-tool.mjs"', manifest),
+    'cmd: "~/.dsh/my-custom-tool.mjs"',
+  );
+
+  // 不同本机绝对路径（Windows vs POSIX）经 pathNormalizations 后应产生一致的本机哈希。
+  writeFileSync(
+    path.join(profileDir, 'cordis.patch.yml'),
+    '- id: dsh-acp-adapter\n  config:\n    command: "C:\\\\Users\\\\alice\\\\.dsh\\\\my-custom-tool.mjs"\n',
+  );
+  const winHash = computeLocalOfficialSettingsHash({ dshHome, repoRoot, selectedItems: ['llm-providers'], selectedPreferences: [] });
+
+  writeFileSync(
+    path.join(profileDir, 'cordis.patch.yml'),
+    '- id: dsh-acp-adapter\n  config:\n    command: "/Users/bob/.dsh/my-custom-tool.mjs"\n',
+  );
+  const posixHash = computeLocalOfficialSettingsHash({ dshHome, repoRoot, selectedItems: ['llm-providers'], selectedPreferences: [] });
+  assert.equal(winHash, posixHash);
+
+  // 推送时同样按 pathNormalizations 归一化后再写入仓库模板，桌面偏好也写入清单指定路径。
+  writeFileSync(path.join(dshHome, 'desktop-preferences.json'), '{"closeToTray":true}\n');
+  const pushed = pushLocalOfficialSettingsToRepo({
+    repoRoot,
+    dshHome,
+    profile: 'main',
+    selectedItems: ['llm-providers', 'desktop-preferences'],
+    selectedPlugins: [],
+    selectedPreferences: [],
+  });
+  assert.equal(pushed.desktopUpdated, true);
+  assert.match(readFileSync(path.join(repoRoot, 'custom', 'patch.yml'), 'utf8'), /~\/\.dsh\/my-custom-tool\.mjs/);
+  assert.equal(readFileSync(path.join(repoRoot, 'custom', 'desktop-prefs.json'), 'utf8'), '{"closeToTray":true}\n');
+});
+
+test('acpFallback 与 restoreScript / desktopPreferencesFile：严格按清单读取，不保留硬编码兜底', (t) => {
+  const tempRoot = mkdtempSync(path.join(tmpdir(), 'dsh-declarative-paths-'));
+  const prevManifest = process.env.DSH_AU_CLOUD_MANIFEST_PATH;
+  t.after(() => {
+    if (prevManifest === undefined) delete process.env.DSH_AU_CLOUD_MANIFEST_PATH;
+    else process.env.DSH_AU_CLOUD_MANIFEST_PATH = prevManifest;
+    rmSync(tempRoot, { recursive: true, force: true });
+  });
+
+  const repoRoot = path.join(tempRoot, 'repo');
+  const dshHome = path.join(tempRoot, 'dshHome');
+  const profileDir = path.join(dshHome, 'profiles', 'desktop');
+  mkdirSync(path.join(repoRoot, 'custom', 'scripts'), { recursive: true });
+  mkdirSync(profileDir, { recursive: true });
+
+  const cloudManifestPath = path.join(tempRoot, 'manifest.cloud.json');
+  process.env.DSH_AU_CLOUD_MANIFEST_PATH = cloudManifestPath;
+  writeFileSync(cloudManifestPath, JSON.stringify({
+    schemaVersion: 1,
+    plugins: { 'zaimokuza-dsh-acp-adapter': { package: '@zaimokuza/dsh-acp-adapter' } },
+  }));
+  // 本机未安装 ACP 插件
+  writeFileSync(path.join(profileDir, 'package.json'), JSON.stringify({ dependencies: {}, dsh: { profile: { bundles: [] } } }));
+
+  const patchText = [
+    '- id: dsh-acp-adapter',
+    '  config:',
+    '    command: "~~/.dsh/cursor-acp-wrapper.mjs"',
+    '- id: agent-default-model',
+    '  config:',
+    '    provider: acp-cursor',
+    '    model: auto',
+    '',
+  ].join('\n');
+  writeFileSync(path.join(repoRoot, 'custom', 'patch.yml'), patchText);
+  writeFileSync(path.join(profileDir, 'cordis.patch.yml'), patchText);
+  writeFileSync(path.join(repoRoot, 'custom', 'desktop.json'), '{"closeToTray":true}\n');
+  const customRestore = path.join(repoRoot, 'custom', 'scripts', 'restore.mjs');
+  writeFileSync(customRestore, 'console.log("ok");\n');
+
+  // 无 acpFallback 声明时，不注入硬编码的 kiro-claude-opus-5-5，本机与云保持一致。
+  writeTestProfilesManifest(repoRoot, {
+    defaultProfile: 'no-fallback',
+    restoreScript: 'custom/scripts/restore.mjs',
+    desktopPreferencesFile: 'custom/desktop.json',
+    profiles: [{ id: 'no-fallback', label: 'NoFallback', file: 'custom/patch.yml', selectable: true }],
+  });
+  const items = Object.fromEntries(buildOfficialSyncItems({ repoRoot, dshHome, profile: 'no-fallback' }).map((i) => [i.id, i]));
+  assert.equal(items['llm-providers'].inSync, true);
+
+  // syncOfficialDesktopPreferences 与 runRestoreScriptForCloudSync 均按清单路径读取。
+  const prefRes = syncOfficialDesktopPreferences({ repoRoot, dshHome, enabled: true });
+  assert.equal(prefRes.updated, true);
+  assert.equal(JSON.parse(readFileSync(path.join(dshHome, 'desktop-preferences.json'), 'utf8')).closeToTray, true);
+
+  let spawnedScript = '';
+  const restoreRes = runRestoreScriptForCloudSync({
+    repoRoot,
+    dshHome,
+    profile: 'no-fallback',
+    selectedItems: ['ui-theme'],
+    selectedPlugins: [],
+    preferences: [],
+    spawnSyncImpl: (_exec, args) => {
+      spawnedScript = args[0];
+      return { status: 0, stdout: 'restored', stderr: '' };
+    },
+  });
+  assert.equal(restoreRes.ok, true);
+  assert.equal(restoreRes.skipped, false);
+  assert.equal(spawnedScript, customRestore);
+});
+
+test('areSelectedSyncItemsInSync：所有已勾选项目与云一致时返回 true，出现真实差异时返回 false', (t) => {
+  const repoRoot = mkdtempSync(path.join(tmpdir(), 'dsh-au-insync-repo-'));
+  const dshHome = mkdtempSync(path.join(tmpdir(), 'dsh-au-insync-home-'));
+  const profileDir = path.join(dshHome, 'profiles', 'desktop');
+  t.after(() => {
+    rmSync(repoRoot, { recursive: true, force: true });
+    rmSync(dshHome, { recursive: true, force: true });
+  });
+
+  mkdirSync(path.join(repoRoot, 'app-config', 'dsh'), { recursive: true });
+  mkdirSync(profileDir, { recursive: true });
+  const patchText = '- id: ui-theme\n  config:\n    fontSize: 14\n';
+  writeFileSync(path.join(repoRoot, 'app-config', 'dsh', 'cordis.patch.general.yml'), patchText);
+  writeFileSync(path.join(profileDir, 'cordis.patch.yml'), patchText);
+  writeTestProfilesManifest(repoRoot, {
+    defaultProfile: 'general',
+    profiles: [{ id: 'general', label: '通用', file: 'app-config/dsh/cordis.patch.general.yml', selectable: true }],
+  });
+
+  // 双端内容一致时应判为 true（可安全清除双基线假冲突）
+  assert.equal(
+    areSelectedSyncItemsInSync({
+      repoRoot,
+      dshHome,
+      profile: 'general',
+      selectedItems: ['ui-theme'],
+      selectedPreferences: [],
+      selectedPlugins: [],
+    }),
+    true,
+  );
+
+  // 本机出现真实内容差异时应判为 false（保留真实冲突提示）
+  writeFileSync(path.join(profileDir, 'cordis.patch.yml'), '- id: ui-theme\n  config:\n    fontSize: 16\n');
+  assert.equal(
+    areSelectedSyncItemsInSync({
+      repoRoot,
+      dshHome,
+      profile: 'general',
+      selectedItems: ['ui-theme'],
+      selectedPreferences: [],
+      selectedPlugins: [],
+    }),
+    false,
+  );
 });
 
 

@@ -52,12 +52,29 @@ function makeSyncFixture(t, { localPatch = '', cloudPatch = '' } = {}) {
   const dshHome = path.join(tempRoot, 'dshHome');
   const profileDir = path.join(dshHome, 'profiles', 'desktop');
   const repoDshDir = path.join(repoRoot, 'app-config', 'dsh');
+  const cloudDir = path.join(repoRoot, 'dsh-sync', 'cloud');
   mkdirSync(profileDir, { recursive: true });
   mkdirSync(repoDshDir, { recursive: true });
+  mkdirSync(cloudDir, { recursive: true });
 
   const manifestPath = path.join(tempRoot, 'manifest.cloud.json');
   process.env.DSH_AU_CLOUD_MANIFEST_PATH = manifestPath;
   writeFileSync(manifestPath, JSON.stringify({ schemaVersion: 1, plugins: {} }));
+
+  writeFileSync(path.join(cloudDir, 'dsh-profiles.json'), JSON.stringify({
+    schemaVersion: 2,
+    defaultProfile: 'kiro',
+    restoreScript: 'scripts/dsh-restore.mjs',
+    desktopPreferencesFile: 'app-config/dsh/desktop-preferences.json',
+    pathNormalizations: [],
+    watchedFiles: [],
+    profiles: ['kiro', 'generic', 'local'].map((id) => ({
+      id,
+      label: id,
+      file: `app-config/dsh/cordis.patch.${id}.yml`,
+      selectable: true,
+    })),
+  }, null, 2));
 
   writeFileSync(path.join(profileDir, 'cordis.patch.yml'), localPatch);
   for (const p of ['kiro', 'generic', 'local']) {
@@ -266,7 +283,13 @@ test('模型提供商按提供商汇总成一行：细节不同也能判出差�
   const repoRoot = path.join(tempRoot, 'repo');
   const dshHome = path.join(tempRoot, 'home');
   mkdirSync(path.join(repoRoot, 'app-config', 'dsh'), { recursive: true });
+  mkdirSync(path.join(repoRoot, 'dsh-sync', 'cloud'), { recursive: true });
   mkdirSync(path.join(dshHome, 'profiles', 'desktop'), { recursive: true });
+  writeFileSync(path.join(repoRoot, 'dsh-sync', 'cloud', 'dsh-profiles.json'), JSON.stringify({
+    schemaVersion: 2,
+    defaultProfile: 'kiro',
+    profiles: [{ id: 'kiro', label: 'kiro', file: 'app-config/dsh/cordis.patch.kiro.yml', selectable: true }],
+  }));
   const block = (url) => [
     '- id: llm-pi-ai', '  config:', '    providers:', '      kiro:', '        displayName: "Kiro"', `        baseURL: ${url}`,
     '        models:', '          - id: "a"', '          - id: "b"',
