@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -64,14 +64,11 @@ test('保存收藏写入本机绑定，保留服务与主机名，脏数据被�
 
     const raw = JSON.parse(readFileSync(localPath, 'utf8'));
     assert.deepEqual(raw.menuFavorites, ['33', '11']);
-    // 备份里不再带运行态开关：它随仓库提交，开关点一次变一次会把树弄脏。
-    assert.deepEqual(raw.services, { antigravity: {} });
+    // 四个开关直接保留在机器备份中，不再抽离到 state.json。
+    assert.deepEqual(raw.services, { antigravity: { enabled: true } });
     assert.equal(raw.hostname, 'test-host');
     assert.notEqual(raw.updatedAt, '2026-01-01T00:00:00.000Z');
-
-    // 内联开关没有丢，被搬进了同目录的本地镜像 state.json。
-    const state = JSON.parse(readFileSync(path.join(path.dirname(localPath), 'state.json'), 'utf8'));
-    assert.equal(state.machines['test-host'].services.antigravity.enabled, true);
+    assert.equal(existsSync(path.join(path.dirname(localPath), 'state.json')), false);
 
     // 读回来是同一份，顺序保持不变
     assert.deepEqual(loadMenuFavorites('test-host').favorites, ['33', '11']);

@@ -189,7 +189,10 @@ test('本地服务 Doctor 能检查启用、开机自启、随 DSH 自启及 sta
     updateMachineServiceFlag({}, hostname(), 'custom_http_svc', 'autoStartOnBoot', true);
     updateMachineServiceFlag({}, hostname(), 'custom_http_svc', 'autoStartOnDsh', true);
 
-    // 1. 检查仓库内绝对路径会被 Doctor 提示应改为相对路径
+    // 1. 检查仓库内绝对路径会被 Doctor 提示应改为相对路径（模拟手改写入的绝对路径）
+    const currentMachine = JSON.parse(readFileSync(mFile, 'utf8'));
+    currentMachine.services.in_repo_bad_abs.scriptPath = inRepoAbs.replace(/\\/g, '/');
+    writeFileSync(mFile, JSON.stringify(currentMachine, null, 2));
     const badCheck = await inspectLocalServiceManagement('in_repo_bad_abs', { skipNetworkProbe: true });
     assert.equal(badCheck.status, 'misconfigured');
     assert.equal(badCheck.scriptPath.usesRepoRelative, false);

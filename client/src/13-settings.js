@@ -937,13 +937,13 @@
         id: 'shortcuts',
         category: '本机设置',
         title: '设备 / 页面切换快捷键',
-        defaultDiff: '按电脑各存一份：推送写本机备份，拉取只读本机备份',
+        defaultDiff: '默认单机备份，勾选后多台电脑云端共享自动同步',
       },
       {
         id: 'modelShortcuts',
         category: '本机设置',
         title: '模型快捷槽位',
-        defaultDiff: '按电脑各存一份：推送写本机备份，拉取只读本机备份',
+        defaultDiff: '默认单机备份，勾选后多台电脑云端共享自动同步',
       },
     ];
 
@@ -1225,7 +1225,7 @@
       const [profile, setProfile] = useState(defaultProfileId);
       const [preferenceMap, setPreferenceMap] = useState(() => {
         const initial = {};
-        for (const id of (cloudSync.selectedPreferences || FALLBACK_PREFERENCE_ITEMS.map(i => i.id))) initial[id] = true;
+        for (const id of (cloudSync.selectedPreferences || [])) initial[id] = true;
         return initial;
       });
       const [selectedMap, setSelectedMap] = useState(() => {
@@ -1258,7 +1258,7 @@
         for (const id of (cloudSync.syncPluginConfigs || FALLBACK_CLOUD_SYNC_PLUGINS.map(p => p.id))) nextConfigs[id] = true;
         setSyncConfigMap(nextConfigs);
         const nextPreferences = {};
-        for (const id of (cloudSync.selectedPreferences || FALLBACK_PREFERENCE_ITEMS.map(i => i.id))) nextPreferences[id] = true;
+        for (const id of (cloudSync.selectedPreferences || [])) nextPreferences[id] = true;
         setPreferenceMap(nextPreferences);
       }, [isOpen, defaultProfileId, cloudSync.selectedItems, cloudSync.selectedPlugins, cloudSync.syncPluginConfigs, cloudSync.selectedPreferences]);
 
@@ -1392,10 +1392,10 @@
               null,
               h('h3', null, '自定义云端同步设置项'),
               h('p', null, isPluginTab
-                ? '勾选需要实时同步的云插件（勾选后自动同步该插件的安装、启用状态与插件配置）。'
+                ? '勾选需要实时同步的云插件（勾选后自动同步该插件的安装、启用状态与插件配置）。未勾选时默认单机备份进私人仓库（自动拦截明文密钥），勾选后升级为多台电脑云端共享自动同步。'
                 : isDshAuTab
-                  ? 'dsh-au 自身配置固定参与云同步，无需勾选：上半部分所有电脑共用一份，下半部分每台电脑各存一份。'
-                  : `当前设备：${machineId || '未识别'} · 勾选需要同步的官方设置，点击任意一行可展开查看本机与云端、官方默认的差异。`)
+                  ? '8 项基础开关所有电脑共用，修改后自动同步到云；快捷键与模型槽位默认单机备份，勾选后改为多台电脑云端共享自动同步。'
+                  : `当前设备：${machineId || '未识别'} · 勾选需要同步的官方设置，点击任意一行可展开查看本机与云端、官方默认的差异。未勾选时默认单机备份进私人仓库（自动拦截明文密钥），勾选后升级为多台电脑云端共享自动同步。`)
             ),
             h(
               'button',
@@ -1479,7 +1479,7 @@
               ? h(
                   'div',
                   { className: 'dsh-au-cloud-sync-pref-section' },
-                  h('p', { className: 'dsh-au-cloud-sync-pref-title' }, '所有电脑共用（固定同步）'),
+                  h('p', { className: 'dsh-au-cloud-sync-pref-title' }, '所有电脑共用（修改后自动同步到云）'),
                   h(
                     'div',
                     { className: `dsh-au-cloud-sync-item is-checked${dshAuPluginItem && dshAuPluginItem.inSync === false ? ' is-diff' : ''}` },
@@ -1505,12 +1505,12 @@
                         h(
                           'span',
                           { className: 'dsh-au-cloud-sync-item-diff' },
-                          '版本 · 启用状态 · 启动时还原窗口 · 新开对话默认完全权限 · 禁止 AI 新建目标 · 智能恢复与自动续跑'
+                          '版本 · 启用状态 · 启动时还原窗口 · 新开对话默认完全权限 · 禁止 AI 新建目标 · 侧边栏显示 DSH AU · 智能恢复与自动续跑'
                         )
                       )
                     )
                   ),
-                  h('p', { className: 'dsh-au-cloud-sync-pref-title' }, '每台电脑各存一份（互不覆盖）'),
+                  h('p', { className: 'dsh-au-cloud-sync-pref-title' }, '默认单机备份（勾选后多台电脑云端共享自动同步）'),
                   preferenceList.map(item => {
                     const jump = PREFERENCE_JUMPS[item.id];
                     const prefChecked = Boolean(preferenceMap[item.id]);
@@ -1764,7 +1764,7 @@
         selectedPlugins: FALLBACK_CLOUD_SYNC_PLUGINS.map(p => p.id),
         syncPluginConfigs: FALLBACK_CLOUD_SYNC_PLUGINS.map(p => p.id),
         pluginsCustomized: false,
-        selectedPreferences: FALLBACK_PREFERENCE_ITEMS.map(i => i.id),
+        selectedPreferences: [],
         lastSyncedHash: '',
         lastSyncedAt: '',
         inSync: true,
@@ -2333,7 +2333,7 @@
           return h(SettingsItem, {
             key: ext.id,
             title: `在侧边栏挂载 ${ext.title}`,
-            description: `控制本机是否在左侧边栏加载「${ext.title}」扩展（${ext.id}）。关闭后立即卸载且不再轮询，只保存在这台电脑，不会同步到其他电脑。`,
+            description: `控制本机是否在左侧边栏加载「${ext.title}」扩展（${ext.id}）。关闭后立即卸载且不再轮询，仅作单机备份保存，不会云端共享到其他电脑。`,
             hint: features.error || (enabled ? '已开启：当前电脑侧边栏已挂载该扩展。' : '已关闭：当前电脑侧边栏不挂载该扩展。'),
             control: h(
               'button',

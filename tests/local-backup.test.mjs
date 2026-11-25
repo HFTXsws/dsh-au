@@ -9,6 +9,7 @@ import {
   ensureLocalBindingMigrated,
   listMachineBindings,
   loadLocalBindings,
+  loadLocalBindingState,
   machineFilePath,
   saveMenuFavorites,
   resolveLocalBindingsPath,
@@ -16,6 +17,7 @@ import {
   switchActiveBinding,
   updateMachinePlugins,
   writeActivePointer,
+  writeLocalBindingState,
 } from '../lib/local-bindings.js';
 
 /** 每个用例独占一套 sync 目录：local/ 存指针与开关，machines/ 存可提交的备份。 */
@@ -48,7 +50,7 @@ test('主机名归一成稳定的备份文件名', () => {
   assert.equal(slugifyMachine(''), 'machine');
 });
 
-test('旧文件迁移成云备份：路径 ~/ 化、开关进状态镜像、旧文件留 .bak', () => {
+test('旧文件迁移成云备份：路径 ~/ 化、开关保留在机器备份、旧文件留 .bak', () => {
   withSyncDir((localDir) => {
     mkdirSync(localDir, { recursive: true });
     writeFileSync(path.join(localDir, 'manifest.local.json'), `${JSON.stringify({
@@ -75,13 +77,14 @@ test('旧文件迁移成云备份：路径 ~/ 化、开关进状态镜像、旧�
     const machine = JSON.parse(readFileSync(machineFilePath('testbook'), 'utf8'));
     assert.equal(machine.services.svc.scriptPath, '~/proj/svc.py');
     assert.equal(machine.services.svc.log, '~/logs/s.log');
-    // 备份是给仓库的：四个开关不该出现在里面。
-    assert.equal(machine.services.svc.enabled, undefined);
-    assert.equal(machine.services.svc.cloud, undefined);
+    // 四个开关直接保留在 machines/<machineId>.json 中。
+    assert.equal(machine.services.svc.enabled, true);
+    assert.equal(machine.services.svc.autoStartOnDsh, true);
+    assert.equal(machine.services.svc.cloud, false);
     assert.deepEqual(machine.menuFavorites, ['11', '33']);
 
-    const state = JSON.parse(readFileSync(path.join(localDir, 'state.json'), 'utf8'));
-    assert.deepEqual(state.machines.testbook.services.svc, { enabled: true, autoStartOnDsh: true, cloud: false });
+    // 不再写入 local/state.json。
+    assert.equal(existsSync(path.join(localDir, 'state.json')), false);
 
     assert.ok(existsSync(path.join(localDir, 'manifest.local.json.bak')), '旧文件要留一份 .bak');
     assert.equal(existsSync(path.join(localDir, 'manifest.local.json')), false);
@@ -199,10 +202,9 @@ test('插件名单写进备份：只记接过哪些云插件，不记启用状�
     const machine = JSON.parse(readFileSync(machineFilePath('plug'), 'utf8'));
     assert.deepEqual(machine.plugins, ['@weibaohui/dsh-continue', 'dsh-market']);
     assert.deepEqual(machine.menuFavorites, ['11']);
-    // 服务绑定不能被一次收藏保存清掉。
+    // 服务绑定不能被一次收藏保存清掉，内联开关也直接保留在机器备份中。
     assert.ok(machine.services.svc);
-    // 启用状态依旧不进备份。
-    assert.equal(machine.services.svc.enabled, undefined);
+    assert.equal(machine.services.svc.enabled, true);
 
     const listed = listMachineBindings('Plug.local');
     assert.equal(listed.items.find((item) => item.machineId === 'plug').pluginCount, 2);
@@ -231,5 +233,74 @@ test('刷新插件名单：没有备份就不凭空创建，有备份只改这�
     // 名单没变就不重写文件，避免每次启动都改 updatedAt。
     const again = updateMachinePlugins(['dsh-market'], 'B1');
     assert.equal(again.changed, false);
+  });
+});
+
+test('开关优先读 machines/<machineId>.json，缺失时回退旧 state.json，写入只更新机器备份', () => {
+  withSyncDir((localDir) => {
+    mkdirSync(path.dirname(machineFilePath('m2')), { recursive: true });
+    mkdirSync(localDir, { recursive: true });
+    writeFileSync(machineFilePath('m2'), `${JSON.stringify({
+      schemaVersion: 2,
+      machineId: 'm2',
+      services: {
+        svcA: { name: 'A', enabled: false, cloud: true },
+        svcB: { name: 'B' },
+      },
+    }, null, 2)}\n`, 'utf8');
+    writeActivePointer('m2');
+    writeFileSync(path.join(localDir, 'state.json'), `${JSON.stringify({
+      schemaVersion: 1,
+      machines: {
+        m2: {
+          services: {
+            svcA: { enabled: true, autoStartOnBoot: true, cloud: false },
+            svcB: { enabled: true, autoStartOnDsh: true },
+          },
+        },
+      },
+    }, null, 2)}\n`, 'utf8');
+
+    // loadLocalBindingState：svcA 以机器备份为准（enabled: false, cloud: true），缺失字段回退 state.json（autoStartOnBoot: true）
+    const state = loadLocalBindingState('m2');
+    assert.deepEqual(state.services.svcA, {
+      enabled: false,
+      autoStartOnBoot: true,
+      autoStartOnDsh: false,
+      cloud: true,
+    });
+    assert.deepEqual(state.services.svcB, {
+      enabled: true,
+      autoStartOnBoot: false,
+      autoStartOnDsh: true,
+      cloud: false,
+    });
+
+    // writeLocalBindingState(updates, machineId) 写入显式布尔值到 machines/m2.json，不写 state.json
+    const stateBefore = readFileSync(path.join(localDir, 'state.json'), 'utf8');
+    const res = writeLocalBindingState({ svcA: { enabled: true, autoStartOnBoot: false } }, 'm2');
+    assert.equal(res.ok, true);
+    assert.equal(res.changed, true);
+    assert.equal(readFileSync(path.join(localDir, 'state.json'), 'utf8'), stateBefore, '不得修改旧 state.json');
+
+    const machineAfter = JSON.parse(readFileSync(machineFilePath('m2'), 'utf8'));
+    assert.deepEqual(
+      {
+        enabled: machineAfter.services.svcA.enabled,
+        autoStartOnBoot: machineAfter.services.svcA.autoStartOnBoot,
+        autoStartOnDsh: machineAfter.services.svcA.autoStartOnDsh,
+        cloud: machineAfter.services.svcA.cloud,
+      },
+      { enabled: true, autoStartOnBoot: false, autoStartOnDsh: false, cloud: true },
+    );
+
+    // loadLocalBindings (非 migrate: false) 一次性合并 svcB 缺失的开关到 machines/m2.json，并保留旧 state.json
+    loadLocalBindings('m2');
+    const mergedMachine = JSON.parse(readFileSync(machineFilePath('m2'), 'utf8'));
+    assert.equal(mergedMachine.services.svcB.enabled, true);
+    assert.equal(mergedMachine.services.svcB.autoStartOnDsh, true);
+    assert.equal(mergedMachine.services.svcB.autoStartOnBoot, false);
+    assert.equal(mergedMachine.services.svcB.cloud, false);
+    assert.ok(existsSync(path.join(localDir, 'state.json')), '旧 state.json 保留不删');
   });
 });

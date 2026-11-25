@@ -79,8 +79,8 @@ test('旧开关只迁一次：已登记且尚无状态的服务才搬，已有�
     assert.deepEqual(profile.autoStartOnBoot, ['fresh']);
     assert.deepEqual(profile.autoStartOnDsh, ['fresh']);
 
-    const saved = JSON.parse(readFileSync(path.join(dir, 'local', 'state.json'), 'utf8'));
-    assert.equal(saved.machines[machineId].services.fresh.enabled, true, '迁移结果落在 state.json');
+    const saved = JSON.parse(readFileSync(machineFilePath(machineId), 'utf8'));
+    assert.equal(saved.services.fresh.enabled, true, '迁移结果落在 machines/<machineId>.json');
   });
 });
 

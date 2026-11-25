@@ -275,3 +275,46 @@ test('CloudSyncFeatureGroup：设置页外层「待同步」计数仅统计已�
   // 仅计入：ui-theme(1) + dsh-au(1) + plugin-a(1) = 3 项待同步（不含 ui-chat、plugin-b、model-shortcuts）
   assert.equal(textOf(outerBadges[0]), '3 项待同步');
 });
+
+test('CloudSyncModal：未提供 selectedPreferences 时默认全不勾选，且 dsh-au 设置页签文案准确反映共享与单机备份规则', () => {
+  const react = makeStatefulReact();
+  const { CloudSyncModal } = loadSettingsComponents(react);
+  const props = makeModalProps({
+    cloudSync: {
+      enabled: true,
+      profile: 'general',
+      selectedItems: ['ui-theme'],
+      selectedPlugins: ['dsh-au'],
+      syncPluginConfigs: ['dsh-au'],
+    },
+  });
+
+  let tree = renderComponent(CloudSyncModal, props, react);
+  let tabs = findAll(tree, (n) => n.type === 'button' && n.props?.role === 'tab');
+  tabs[1].props.onClick();
+  tree = renderComponent(CloudSyncModal, props, react);
+
+  const modalText = textOf(tree);
+  assert.match(modalText, /所有电脑共用（修改后自动同步到云）/);
+  assert.match(modalText, /默认单机备份（勾选后多台电脑云端共享自动同步）/);
+
+  const checkboxes = findAll(tree, (n) => n.type === 'input' && n.props?.type === 'checkbox');
+  assert.equal(checkboxes.length, 2);
+  assert.equal(checkboxes[0].props.checked, false);
+  assert.equal(checkboxes[1].props.checked, false);
+});
+
+test('CloudSyncModal：「官方设置」与「其它云插件」页签顶部说明包含默认单机备份与明文密钥拦截提示', () => {
+  const react = makeStatefulReact();
+  const { CloudSyncModal } = loadSettingsComponents(react);
+  const props = makeModalProps();
+  const expectedPhrase = '未勾选时默认单机备份进私人仓库（自动拦截明文密钥），勾选后升级为多台电脑云端共享自动同步';
+
+  let tree = renderComponent(CloudSyncModal, props, react);
+  assert.ok(textOf(tree).includes(expectedPhrase), '官方设置页签顶部应包含单机备份与明文拦截说明');
+
+  const tabs = findAll(tree, (n) => n.type === 'button' && n.props?.role === 'tab');
+  tabs[2].props.onClick();
+  tree = renderComponent(CloudSyncModal, props, react);
+  assert.ok(textOf(tree).includes(expectedPhrase), '其它云插件页签顶部应包含单机备份与明文拦截说明');
+});
