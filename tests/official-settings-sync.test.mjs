@@ -2191,4 +2191,112 @@ test('restoreUncheckedSettingsFromMachine：仅在缺失时缺省恢复未勾选
   }
 });
 
+test('normalizeLocalPatchPaths 幂等性：已是 ~/.dsh/... 路径时不产生 ~~/.dsh/...，真实绝对路径正常归一化', () => {
+  const newManifest = {
+    pathNormalizations: [
+      {
+        pattern: '[A-Za-z]:\\\\\\\\[^\\n"]*?cursor-acp-wrapper\\.mjs|(?<![~A-Za-z0-9_./:-])/[^\\n"]*?cursor-acp-wrapper\\.mjs',
+        replacement: '~/.dsh/cursor-acp-wrapper.mjs',
+      },
+      {
+        pattern: '[A-Za-z]:\\\\\\\\[^\\n"]*?antigravity-acp-wrapper\\.mjs|(?<![~A-Za-z0-9_./:-])/[^\\n"]*?antigravity-acp-wrapper\\.mjs',
+        replacement: '~/.dsh/antigravity-acp-wrapper.mjs',
+      },
+    ],
+  };
+  const legacyManifest = {
+    pathNormalizations: [
+      {
+        pattern: '[A-Za-z]:\\\\\\\\[^\\n"]*?cursor-acp-wrapper\\.mjs|/[^\\n"]*?cursor-acp-wrapper\\.mjs',
+        replacement: '~/.dsh/cursor-acp-wrapper.mjs',
+      },
+    ],
+  };
+
+  const alreadyPortable = 'args:\n  - "~/.dsh/cursor-acp-wrapper.mjs"\n  - "~/.dsh/antigravity-acp-wrapper.mjs"\n';
+  assert.equal(normalizeLocalPatchPaths(alreadyPortable, newManifest), alreadyPortable);
+  assert.equal(normalizeLocalPatchPaths(alreadyPortable, legacyManifest), alreadyPortable);
+
+  const winAbs = 'args:\n  - "C:\\\\Users\\\\alice\\\\.dsh\\\\cursor-acp-wrapper.mjs"\n  - "C:\\\\Users\\\\alice\\\\.dsh\\\\antigravity-acp-wrapper.mjs"\n';
+  const normWin = normalizeLocalPatchPaths(winAbs, newManifest);
+  assert.equal(normWin, alreadyPortable);
+  assert.equal(normalizeLocalPatchPaths(normWin, newManifest), alreadyPortable);
+
+  const posixAbs = 'args:\n  - "/Users/alice/.dsh/cursor-acp-wrapper.mjs"\n  - "/home/alice/.dsh/antigravity-acp-wrapper.mjs"\n';
+  assert.equal(normalizeLocalPatchPaths(posixAbs, newManifest), alreadyPortable);
+});
+
+test('pushLocalOfficialSettingsToRepo：语义等价时跳过覆写，保留仓库注释、行内数组空格与 JSON 键序', (t) => {
+  const tempRoot = mkdtempSync(path.join(tmpdir(), 'dsh-push-semantic-skip-'));
+  t.after(() => rmSync(tempRoot, { recursive: true, force: true }));
+
+  const repoRoot = path.join(tempRoot, 'repo');
+  const dshHome = path.join(tempRoot, 'dsh');
+  const profileDir = path.join(dshHome, 'profiles', 'desktop');
+  mkdirSync(path.join(repoRoot, 'app-config', 'dsh'), { recursive: true });
+  mkdirSync(profileDir, { recursive: true });
+  writeTestProfilesManifest(repoRoot);
+
+  const repoPatchOriginal = [
+    '- id: llm-pi-ai',
+    '  config:',
+    '    providers:',
+    '      demo:',
+    '        models:',
+    '          - id: m1',
+    '            input: [ text, image ]',
+    '            # 保留的说明注释',
+    '            reasoningEfforts:',
+    '              low: low',
+    '- id: dsh-acp-adapter',
+    '  config:',
+    '    args:',
+    '      - "~/.dsh/cursor-acp-wrapper.mjs"',
+    '',
+  ].join('\n');
+  const repoDesktopOriginal = '{\n  "sidebarFooterCompat": true,\n  "logLevel": "info"\n}\n';
+
+  const repoPatchPath = path.join(repoRoot, 'app-config', 'dsh', 'cordis.patch.general.yml');
+  const repoDesktopPath = path.join(repoRoot, 'app-config', 'dsh', 'desktop-preferences.json');
+  writeFileSync(repoPatchPath, repoPatchOriginal);
+  writeFileSync(repoDesktopPath, repoDesktopOriginal);
+
+  // 本机内容语义完全一致，仅少了注释、数组空格变为 [text, image]、JSON 键序重排
+  const localPatchEquivalent = [
+    '- id: llm-pi-ai',
+    '  config:',
+    '    providers:',
+    '      demo:',
+    '        models:',
+    '          - id: m1',
+    '            input: [text, image]',
+    '            reasoningEfforts:',
+    '              low: low',
+    '- id: dsh-acp-adapter',
+    '  config:',
+    '    args:',
+    '      - "C:\\\\Users\\\\alice\\\\.dsh\\\\cursor-acp-wrapper.mjs"',
+    '',
+  ].join('\n');
+  const localDesktopEquivalent = '{\n  "logLevel": "info",\n  "sidebarFooterCompat": true\n}\n';
+  writeFileSync(path.join(profileDir, 'cordis.patch.yml'), localPatchEquivalent);
+  writeFileSync(path.join(dshHome, 'desktop-preferences.json'), localDesktopEquivalent);
+
+  const res = pushLocalOfficialSettingsToRepo({
+    repoRoot,
+    dshHome,
+    profile: 'general',
+    selectedItems: ['llm-pi-ai', 'dsh-acp-adapter', 'desktop-preferences'],
+    selectedPlugins: [],
+    syncDshAuPreferences: false,
+    removeUninstalledPlugins: false,
+  });
+
+  assert.deepEqual(res.updatedPatchIds, []);
+  assert.equal(res.desktopUpdated, false);
+  assert.equal(readFileSync(repoPatchPath, 'utf8'), repoPatchOriginal);
+  assert.equal(readFileSync(repoDesktopPath, 'utf8'), repoDesktopOriginal);
+});
+
+
 
