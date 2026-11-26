@@ -5,6 +5,7 @@ import { DEFAULT_AUTO_CONTINUE } from '../lib/features.js';
 import {
   installAutoContinueRecovery,
   isPayloadTooLargeOrOverflowFailure,
+  isTimeoutFailure,
   matchAutoContinueRule,
 } from '../lib/auto-continue-recovery.js';
 
@@ -580,5 +581,77 @@ test('自定义规则支持 compact_retry 延迟、followup_prompt 与独立重�
   });
   assert.equal(outFollowup2.delegated, 1);
 });
+
+test('isTimeoutFailure 正确识别 TIMEOUT / 流空闲超时 / 408 / 504 / upstream_stream_interrupted，不误判 503 断连与 413', () => {
+  assert.equal(isTimeoutFailure({ code: 'TIMEOUT' }), true);
+  assert.equal(isTimeoutFailure({ code: 'TIMEOUT', message: 'pi-ai stream idle timeout after 300000ms' }), true);
+  assert.equal(isTimeoutFailure({ message: 'pi-ai stream idle timeout after 300000ms' }), true);
+  assert.equal(isTimeoutFailure({ status: 408, message: 'Request Timeout' }), true);
+  assert.equal(isTimeoutFailure({ status: 504, message: 'Gateway Timeout' }), true);
+  assert.equal(isTimeoutFailure({ message: 'upstream_stream_interrupted' }), true);
+  assert.equal(isTimeoutFailure({ message: 'connect ETIMEDOUT' }), true);
+  assert.equal(isTimeoutFailure({ message: 'stream_timeout' }), true);
+
+  // 非超时 503 远端断连、413 超大包、鉴权/额度终态均返回 false
+  assert.equal(
+    isTimeoutFailure({
+      status: 503,
+      code: 'SERVER',
+      message: 'auth_unavailable: no auth available (last upstream error: Remote end closed connection without response)',
+    }),
+    false,
+  );
+  assert.equal(isTimeoutFailure({ status: 413, message: 'Payload Too Large' }), false);
+  assert.equal(isTimeoutFailure({ status: 401, code: 'TIMEOUT', message: 'stream idle timeout' }), false);
+  assert.equal(isTimeoutFailure({ status: 429, code: 'QUOTA', message: 'insufficient quota timed out' }), false);
+  assert.equal(isTimeoutFailure(null), false);
+});
+
+test('TIMEOUT 流空闲超时连续失败 2 次及以上时仅延迟重试，绝不触发强制压缩，且不污染 compactedOnce 状态', async (t) => {
+  const agent = createAgent('main');
+  const sleeps = [];
+  const compactions = [];
+  const host = createHost({
+    autoContinue: { enabled: true, retryDelaySec: 60, maxRetries: 4, compactOnDisconnect: true },
+    presetCompaction: {
+      async compactIfNeeded(receivedAgent, trigger) {
+        compactions.push({ id: receivedAgent.id, trigger });
+      },
+    },
+    options: {
+      sleep: async (ms, sig) => {
+        sleeps.push(ms);
+        return !sig?.aborted;
+      },
+    },
+  });
+  t.after(host.dispose);
+
+  const errTimeout = {
+    code: 'TIMEOUT',
+    message: 'pi-ai stream idle timeout after 300000ms',
+  };
+
+  // 第 1 次、第 2 次、第 3 次连续流超时：均正常延迟重试，但绝不调用 compactIfNeeded
+  for (let i = 1; i <= 3; i++) {
+    const out = await host.requestError({ agent, failure: errTimeout, signal: new AbortController().signal });
+    assert.deepEqual(out.result, { kind: 'retry' });
+    assert.equal(out.delegated, 0);
+    assert.equal(compactions.length, 0, `第 ${i} 次超时不应触发强制上下文压缩`);
+    assert.equal(sleeps.length, i);
+  }
+
+  // 若随后第 4 次遇到真实 503 远端断连，因 compactedOnce 未被超时污染，仍能正常触发一次隔离压缩
+  const err503 = {
+    status: 503,
+    code: 'SERVER',
+    message: 'Remote end closed connection without response',
+  };
+  const fourth = await host.requestError({ agent, failure: err503, signal: new AbortController().signal });
+  assert.deepEqual(fourth.result, { kind: 'retry' });
+  assert.equal(compactions.length, 1);
+  assert.deepEqual(compactions[0], { id: 'main', trigger: 'context-overflow' });
+});
+
 
 
