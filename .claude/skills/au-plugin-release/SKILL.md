@@ -71,3 +71,11 @@ Release 日志草稿要求（适配 `dshmarket` 宽屏 Markdown 渲染器）：
      ```powershell
      node .claude/skills/au-plugin-release/scripts/release-plugin.mjs --mode publish-release --target-version <nextVersion> --notes-file <notesFilePath>
      ```
+
+### 4. 发版收尾：同步云端插件清单（防多机 `VERSION_MISMATCH`）
+
+`dsh-au` 作为 `local` / `local-repo` 软链插件，官方配置同步在启动时会自动跳过版号上云（避免其他机器未 `git pull` 时产生假不一致）。因此 GitHub Release 发布完成后，必须提醒用户在当前已更新到新版的机器上完成一次手动云清单对齐：
+
+1. 在 DSH 中打开「插件管理 → 同步到云」，将云清单中的 `dsh-au` 版本更新为 `<nextVersion>`。
+2. 在对应的同步仓库中提交并推送该变更，避免其他机器执行 Doctor 时触发 `VERSION_MISMATCH`。
+
