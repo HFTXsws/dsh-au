@@ -914,7 +914,7 @@
       );
     }
 
-    /** 服务端未返回前的兜底同步项（7 项非模型官方配置 + 5 项模型子项，共 12 项；对比细节以服务端为准）。 */
+    /** 服务端未返回前的兜底同步项（7 项非模型官方配置 + 4 项模型子项，共 11 项；对比细节以服务端为准）。 */
     const FALLBACK_CLOUD_SYNC_ITEMS = [
       { id: 'ui-theme', title: '外观：字号', patchIds: ['ui-theme'], comparisons: [] },
       { id: 'ui-chat', title: '聊天内容展示', patchIds: ['ui-chat'], comparisons: [] },
@@ -924,7 +924,6 @@
       { id: 'permission-preset', title: '权限：新会话的默认权限模式', patchIds: ['permission'], comparisons: [] },
       { id: 'desktop-preferences', title: '桌面设置：后台运行、浏览器与局域网、桌面通知', patchIds: [], isDesktopPreferences: true, comparisons: [] },
       { id: 'llm-pi-ai', title: '模型提供商', category: 'models', nonOfficial: true, patchIds: ['llm-pi-ai'], comparisons: [] },
-      { id: 'agent-default-model', title: '默认模型', category: 'models', nonOfficial: true, patchIds: ['agent-default-model'], comparisons: [] },
       { id: 'claude-launcher', title: 'Claude 启动器与 4 档位映射', category: 'models', nonOfficial: true, patchIds: [], comparisons: [] },
       { id: 'codex-catalog', title: 'Codex 模型目录', category: 'models', nonOfficial: true, patchIds: [], comparisons: [] },
       { id: 'dsh-acp-adapter', title: 'Cursor ACP 适配器', category: 'models', nonOfficial: true, patchIds: ['dsh-acp-adapter'], comparisons: [] },
@@ -933,7 +932,6 @@
     /** 模型配置大类包含的子项 ID */
     const MODEL_CONFIG_ITEM_IDS = new Set([
       'llm-pi-ai',
-      'agent-default-model',
       'claude-launcher',
       'codex-catalog',
       'dsh-acp-adapter',
@@ -1520,16 +1518,40 @@
 
       const hasConflictOrDiff = conflictRows.length > 0 || Boolean(cloudSync.conflict);
 
-      const handleResolveRow = (row, direction) => {
+      const handleResolveRow = async (row, direction) => {
         if (busy) return;
         if (typeof onResolveConflict === 'function') {
-          void onResolveConflict({ kind: row.kind, id: row.id, direction, profile });
-          showToast(direction === 'push' ? `✓ 已将「${row.title}」用本机覆盖云端` : `✓ 已将「${row.title}」用云端覆盖本机`);
+          try {
+            const res = await onResolveConflict({ kind: row.kind, id: row.id, direction, profile });
+            if (res && res.ok === false) {
+              showToast(res.error || '处理冲突失败', true);
+              return;
+            }
+            if (res && res.skipped) {
+              showToast(res.message || '未执行覆盖（已跳过）', true);
+              return;
+            }
+            showToast(direction === 'push' ? `✓ 已将「${row.title}」用本机覆盖云端` : `✓ 已将「${row.title}」用云端覆盖本机`);
+          } catch (err) {
+            showToast(err?.message || '处理冲突异常', true);
+          }
           return;
         }
         if (row.kind === 'plugin' && typeof onSyncSinglePlugin === 'function') {
-          void onSyncSinglePlugin({ profile, pluginId: row.id, direction });
-          showToast(direction === 'push' ? `✓ 已将「${row.title}」推送到云` : `✓ 已将「${row.title}」同步到本地`);
+          try {
+            const res = await onSyncSinglePlugin({ profile, pluginId: row.id, direction });
+            if (res && res.ok === false) {
+              showToast(res.error || '单插件同步失败', true);
+              return;
+            }
+            if (res && res.skipped) {
+              showToast(res.message || '未执行同步（已跳过）', true);
+              return;
+            }
+            showToast(direction === 'push' ? `✓ 已将「${row.title}」推送到云` : `✓ 已将「${row.title}」同步到本地`);
+          } catch (err) {
+            showToast(err?.message || '单插件同步异常', true);
+          }
           return;
         }
         if (direction === 'push' && typeof onPushToRepo === 'function') {
@@ -1594,7 +1616,7 @@
       };
 
       const footerToastText = toast?.text || message || '';
-      const footerToastError = Boolean(toast?.isError || (!toast && message && /失败|异常|错误/.test(message)));
+      const footerToastError = Boolean(toast?.isError || (!toast && message && /失败|异常|错误|未声明|不存在|未配置|已跳过/.test(message)));
 
       return h(
         'div',
@@ -2424,11 +2446,15 @@
               if (typeof loadModelShortcuts === 'function') void loadModelShortcuts();
             }
             setMessage(res.message || (direction === 'push' ? '已用本机覆盖云端' : '已用云端覆盖本机'));
+            return { ok: true, skipped: Boolean(res.skipped), message: res.message || '' };
           } else {
-            setMessage(res?.error || '处理冲突失败');
+            const err = res?.error || '处理冲突失败';
+            setMessage(err);
+            return { ok: false, skipped: false, error: err };
           }
         } catch {
           setMessage('处理冲突异常');
+          return { ok: false, skipped: false, error: '处理冲突异常' };
         } finally {
           setBusy(false);
         }
@@ -2451,12 +2477,16 @@
           if (res?.ok) {
             applyCloudSyncResponse(res);
             if (direction === 'pull') void loadFeatures();
-            setMessage(direction === 'push' ? `已将 ${pluginId} 本地状态推送到云` : `已将 ${pluginId} 从云同步到本地`);
+            setMessage(res.message || (direction === 'push' ? `已将 ${pluginId} 本地状态推送到云` : `已将 ${pluginId} 从云同步到本地`));
+            return { ok: true, skipped: Boolean(res.skipped), message: res.message || '' };
           } else {
-            setMessage(res?.error || '单插件同步失败');
+            const err = res?.error || '单插件同步失败';
+            setMessage(err);
+            return { ok: false, skipped: false, error: err };
           }
         } catch {
           setMessage('单插件同步异常');
+          return { ok: false, skipped: false, error: '单插件同步异常' };
         } finally {
           setBusy(false);
         }

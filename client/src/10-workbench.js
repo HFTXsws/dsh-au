@@ -262,9 +262,8 @@
 
       const buildPreviewText = (item) => {
         if (!item) return '';
-        const scriptRef = item.resolvedScript || (item.runner === 'platform'
-          ? `scripts/${item.script}${isWin ? '.ps1' : '.sh'}`
-          : `scripts/${item.script}`);
+        const scriptRef = item.resolvedScript
+          || `${item.script}${item.runner === 'platform' ? (isWin ? '.ps1' : '.sh') : ''}`;
         // 与后端 preview 对齐：本机没有 pwsh 时 menuSpec.psCommandName 为 powershell。
         const psName = wb?.menuSpec?.psCommandName || 'pwsh';
         const base = item.runner === 'node'
@@ -959,8 +958,8 @@
         h(
           'footer',
           { className: 'dsh-au-wb-foot' },
-          h('span', null, '支持序号直达 (11-71) · 双击无参卡片直接执行 · 后台服务独立于 DSH 运行，支持按电脑保存自启组合'),
-          h('span', null, `本机: ${wb?.selfHostname || 'DSH'} · SSOT: scripts/menu.json`)
+          h('span', null, '支持序号直达 · 双击无参卡片直接执行 · 后台服务独立于 DSH 运行，支持按电脑保存自启组合'),
+          h('span', null, `本机: ${wb?.selfHostname || 'DSH'} · 菜单清单: ${wb?.menuSpec?.sourceLabel || 'menu.json'}`)
         )
       );
 

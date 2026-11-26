@@ -598,6 +598,26 @@
         .dsh-au-startup-sync-footer { display:flex; justify-content:flex-end; gap:8px; padding:12px 20px 16px; border-top:1px solid var(--dsw-alias-border-l1,#262f40); background:rgba(255,255,255,0.015); }
         .dsh-au-startup-sync-footer .dsh-au-btn { min-height:32px; padding:6px 14px; font-size:12.5px; font-weight:500; background:var(--dsw-alias-bg-layer-2,#1f2636); color:var(--dsw-alias-label-primary,#f1f5f9); border-color:var(--dsw-alias-border-l2,rgba(255,255,255,0.14)); }
         .dsh-au-startup-sync-footer .dsh-au-btn:hover { background:var(--dsw-alias-interactive-bg-hover-solid,#2a3347); border-color:var(--dsw-alias-state-business-primary,#60a5fa); color:#ffffff; }
+        /* 全局自动云同步非阻塞 Toast 提示，兼容浅色与暗色主题 */
+        .dsh-au-global-toast { position:fixed; right:20px; bottom:20px; z-index:2147483640; max-width:360px; min-width:240px; display:flex; align-items:flex-start; gap:10px; padding:12px 14px; border-radius:10px; border:1px solid var(--dsw-alias-border-primary,rgba(15,23,42,0.12)); border-left:4px solid var(--dsw-alias-border-primary,rgba(15,23,42,0.28)); background:var(--dsw-alias-bg-elevated,#ffffff); color:var(--dsw-alias-label-primary,#111827); box-shadow:0 12px 32px -6px rgba(15,23,42,0.18), 0 2px 8px rgba(15,23,42,0.08); box-sizing:border-box; animation:dshAuToastIn .22s cubic-bezier(0.16,1,0.3,1) both; }
+        body[data-ds-dark-theme] .dsh-au-global-toast { border-color:var(--dsw-alias-border-primary,#2e3646); background:var(--dsw-alias-bg-elevated,#1a1f2c); color:var(--dsw-alias-label-primary,#f1f5f9); box-shadow:0 14px 36px -6px rgba(0,0,0,0.55), 0 2px 10px rgba(0,0,0,0.3); }
+        .dsh-au-global-toast.is-ok { border-left-color:var(--dsw-alias-state-success-primary,#10b981); }
+        .dsh-au-global-toast.is-warn { border-left-color:var(--dsw-alias-state-warn-primary,#f59e0b); }
+        .dsh-au-global-toast-icon { flex:0 0 18px; width:18px; height:18px; margin-top:1px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; line-height:1; }
+        .dsh-au-global-toast.is-ok .dsh-au-global-toast-icon { background:color-mix(in srgb,var(--dsw-alias-state-success-primary,#10b981) 16%,transparent); color:var(--dsw-alias-state-success-primary,#10b981); }
+        .dsh-au-global-toast.is-warn .dsh-au-global-toast-icon { background:color-mix(in srgb,var(--dsw-alias-state-warn-primary,#f59e0b) 18%,transparent); color:var(--dsw-alias-state-warn-primary,#f59e0b); }
+        .dsh-au-global-toast-body { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:3px; }
+        .dsh-au-global-toast-title { font-size:13px; font-weight:600; line-height:1.4; color:var(--dsw-alias-label-primary,#111827); overflow-wrap:anywhere; }
+        body[data-ds-dark-theme] .dsh-au-global-toast-title { color:var(--dsw-alias-label-primary,#f8fafc); }
+        .dsh-au-global-toast-msg { font-size:12px; line-height:1.5; color:var(--dsw-alias-label-secondary,#475569); white-space:pre-wrap; overflow-wrap:anywhere; }
+        body[data-ds-dark-theme] .dsh-au-global-toast-msg { color:var(--dsw-alias-label-secondary,#cbd5e1); }
+        .dsh-au-global-toast-close { flex:0 0 auto; display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; margin:-2px -4px 0 2px; padding:0; border:1px solid transparent; border-radius:6px; background:transparent; color:var(--dsw-alias-label-secondary,#64748b); cursor:pointer; font-size:16px; line-height:1; transition:background-color .15s, color .15s; }
+        body[data-ds-dark-theme] .dsh-au-global-toast-close { color:var(--dsw-alias-label-secondary,#94a3b8); }
+        .dsh-au-global-toast-close:hover { background:var(--dsw-alias-interactive-bg-hover-solid,rgba(148,163,184,0.16)); color:var(--dsw-alias-label-primary,#111827); }
+        body[data-ds-dark-theme] .dsh-au-global-toast-close:hover { color:var(--dsw-alias-label-primary,#f8fafc); }
+        @keyframes dshAuToastIn { from { opacity:0; transform:translateY(10px) scale(0.98); } to { opacity:1; transform:translateY(0) scale(1); } }
+        @media (prefers-reduced-motion: reduce) { .dsh-au-global-toast { animation:none; } }
+        @media (max-width: 640px) { .dsh-au-global-toast { right:12px; left:12px; bottom:12px; max-width:none; min-width:0; } }
         .dsh-au-shortcut-modal-body > .dsh-au-settings-group > h3,
         .dsh-au-shortcut-modal-body > .dsh-au-settings-group > .dsh-au-settings-desc,
         .dsh-au-model-shortcut-modal-body > .dsh-au-settings-group > h3 { display:none; }

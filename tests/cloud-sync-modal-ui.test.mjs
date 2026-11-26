@@ -412,3 +412,136 @@ test('CloudSyncFeatureGroup：设置页外层「待同步」计数仅统计已�
   // 仅计入：ui-theme(1) + dsh-au(1) + plugin-a(1) = 3 项待同步（不含 ui-chat、plugin-b、modelShortcuts）
   assert.equal(textOf(outerBadges[0]), '3 项待同步');
 });
+
+test('CloudSyncModal：onResolveConflict 返回 ok:false 时绝不弹出成功提示，而是显示错误提示', async () => {
+  const react = makeStatefulReact();
+  const { CloudSyncModal } = loadSettingsComponents(react);
+  const props = makeModalProps({
+    cloudSync: {
+      enabled: true,
+      profile: 'general',
+      conflict: true,
+      selectedItems: ['ui-theme'],
+      selectedPlugins: ['dsh-au'],
+      selectedPreferences: [],
+    },
+    items: [
+      {
+        id: 'ui-theme',
+        title: '外观：字号',
+        inSync: false,
+        fields: [{ key: 'ui-theme.fontSize', label: '字号', local: '15px', cloud: '14px' }],
+      },
+    ],
+    pluginItems: [{ id: 'dsh-au', title: 'dsh-au', inSync: true }],
+    onResolveConflict: async () => ({ ok: false, error: '方案清单未声明 restoreScript' }),
+  });
+
+  let tree = renderComponent(CloudSyncModal, props, react);
+  const diffItem = findAll(tree, (n) => hasClass(n, 'dsh-au-cs-diff-item'))[0];
+  const miniBtns = findAll(diffItem, (n) => hasClass(n, 'dsh-au-cs-mini-btn'));
+  assert.equal(miniBtns.length, 2);
+
+  await miniBtns[1].props.onClick({ stopPropagation() {} });
+  tree = renderComponent(CloudSyncModal, props, react);
+
+  const toastHint = findAll(tree, (n) => hasClass(n, 'dsh-au-cs-toast-hint'))[0];
+  assert.ok(hasClass(toastHint, 'show'));
+  assert.ok(hasClass(toastHint, 'is-error'), '失败提示必须带 is-error 样式');
+  assert.equal(textOf(toastHint), '方案清单未声明 restoreScript');
+  assert.doesNotMatch(textOf(toastHint), /✓ 已将.*用云端覆盖本机/);
+
+  // 兜底 message 无 toast 时也应识别「未声明」为错误态
+  const fallbackTree = renderComponent(
+    CloudSyncModal,
+    makeModalProps({ message: '方案清单未声明 restoreScript' }),
+    makeStatefulReact(),
+  );
+  const fallbackToast = findAll(fallbackTree, (n) => hasClass(n, 'dsh-au-cs-toast-hint'))[0];
+  assert.ok(hasClass(fallbackToast, 'is-error'));
+});
+
+test('CloudSyncModal：onResolveConflict 返回 skipped:true 时不弹出绿色覆盖成功提示', async () => {
+  const react = makeStatefulReact();
+  const { CloudSyncModal } = loadSettingsComponents(react);
+  const props = makeModalProps({
+    cloudSync: {
+      enabled: true,
+      profile: 'general',
+      conflict: true,
+      selectedItems: ['ui-theme'],
+      selectedPlugins: ['dsh-au'],
+      selectedPreferences: [],
+    },
+    items: [
+      {
+        id: 'ui-theme',
+        title: '外观：字号',
+        inSync: false,
+        fields: [{ key: 'ui-theme.fontSize', label: '字号', local: '15px', cloud: '14px' }],
+      },
+    ],
+    pluginItems: [{ id: 'dsh-au', title: 'dsh-au', inSync: true }],
+    onResolveConflict: async () => ({ ok: true, skipped: true, message: '未勾选任何同步项' }),
+  });
+
+  let tree = renderComponent(CloudSyncModal, props, react);
+  const diffItem = findAll(tree, (n) => hasClass(n, 'dsh-au-cs-diff-item'))[0];
+  const miniBtns = findAll(diffItem, (n) => hasClass(n, 'dsh-au-cs-mini-btn'));
+
+  await miniBtns[1].props.onClick({ stopPropagation() {} });
+  tree = renderComponent(CloudSyncModal, props, react);
+
+  const toastHint = findAll(tree, (n) => hasClass(n, 'dsh-au-cs-toast-hint'))[0];
+  assert.ok(hasClass(toastHint, 'show'));
+  assert.ok(hasClass(toastHint, 'is-error'), '已跳过提示应以错误/警告态展示，而非绿色成功');
+  assert.equal(textOf(toastHint), '未勾选任何同步项');
+  assert.doesNotMatch(textOf(toastHint), /✓ 已将/);
+});
+
+test('CloudSyncModal：onResolveConflict 异步 resolve ok:true 后才弹出成功提示', async () => {
+  const react = makeStatefulReact();
+  const { CloudSyncModal } = loadSettingsComponents(react);
+  let resolveConflict;
+  const props = makeModalProps({
+    cloudSync: {
+      enabled: true,
+      profile: 'general',
+      conflict: true,
+      selectedItems: ['ui-theme'],
+      selectedPlugins: ['dsh-au'],
+      selectedPreferences: [],
+    },
+    items: [
+      {
+        id: 'ui-theme',
+        title: '外观：字号',
+        inSync: false,
+        fields: [{ key: 'ui-theme.fontSize', label: '字号', local: '15px', cloud: '14px' }],
+      },
+    ],
+    pluginItems: [{ id: 'dsh-au', title: 'dsh-au', inSync: true }],
+    onResolveConflict: () => new Promise((resolve) => { resolveConflict = resolve; }),
+  });
+
+  let tree = renderComponent(CloudSyncModal, props, react);
+  const diffItem = findAll(tree, (n) => hasClass(n, 'dsh-au-cs-diff-item'))[0];
+  const miniBtns = findAll(diffItem, (n) => hasClass(n, 'dsh-au-cs-mini-btn'));
+
+  const pending = miniBtns[1].props.onClick({ stopPropagation() {} });
+
+  // Promise 尚未 resolve 时，不得提前弹出成功提示
+  tree = renderComponent(CloudSyncModal, props, react);
+  let toastHint = findAll(tree, (n) => hasClass(n, 'dsh-au-cs-toast-hint'))[0];
+  assert.equal(hasClass(toastHint, 'show'), false, '异步未完成前不应提前展示提示');
+  assert.doesNotMatch(textOf(toastHint), /✓ 已将/);
+
+  resolveConflict({ ok: true });
+  await pending;
+
+  tree = renderComponent(CloudSyncModal, props, react);
+  toastHint = findAll(tree, (n) => hasClass(n, 'dsh-au-cs-toast-hint'))[0];
+  assert.ok(hasClass(toastHint, 'show'));
+  assert.equal(hasClass(toastHint, 'is-error'), false);
+  assert.equal(textOf(toastHint), '✓ 已将「外观：字号」用云端覆盖本机');
+});

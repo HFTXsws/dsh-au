@@ -28,6 +28,35 @@
     }
     // END resolveFloatingCapsuleIpBadge
 
+    const CLOUD_SYNC_TOAST_MAX_AGE_MS = 30_000;
+    const CLOUD_SYNC_TOAST_DURATION_OK_MS = 4000;
+    const CLOUD_SYNC_TOAST_DURATION_WARN_MS = 6000;
+
+    // 全局云同步 Toast 判定：去重、30 秒新鲜度过滤与不同状态自动关闭时长计算
+    function resolveCloudSyncToastDecision(toast, lastSeenId, nowMs = Date.now()) {
+      if (!toast || typeof toast !== 'object') return { action: 'ignore', nextLastSeenId: lastSeenId };
+      const id = typeof toast.id === 'string' ? toast.id : String(toast.id ?? '');
+      if (!id || id === lastSeenId) return { action: 'ignore', nextLastSeenId: lastSeenId };
+      const createdAtMs = toast.createdAt != null && toast.createdAt !== ''
+        ? (typeof toast.createdAt === 'number' ? toast.createdAt : Date.parse(toast.createdAt))
+        : NaN;
+      if (Number.isFinite(createdAtMs) && (nowMs - createdAtMs) > CLOUD_SYNC_TOAST_MAX_AGE_MS) {
+        return { action: 'skip_stale', nextLastSeenId: id };
+      }
+      const status = toast.status === 'warn' ? 'warn' : 'ok';
+      const durationMs = status === 'warn'
+        ? CLOUD_SYNC_TOAST_DURATION_WARN_MS
+        : CLOUD_SYNC_TOAST_DURATION_OK_MS;
+      return {
+        action: 'show',
+        nextLastSeenId: id,
+        toast,
+        status,
+        durationMs,
+      };
+    }
+    // END resolveCloudSyncToastDecision
+
     function planScreenLockRemoteFrames({
       enabled,
       wasEnabled,
@@ -483,7 +512,22 @@
       const [dismissedCloudSyncNoticeId, setDismissedCloudSyncNoticeId] = useState('');
       const [cloudSyncNoticeBusy, setCloudSyncNoticeBusy] = useState(false);
       const [cloudSyncNoticeFeedback, setCloudSyncNoticeFeedback] = useState('');
+      const [cloudSyncToast, setCloudSyncToast] = useState(null);
       const mobileToolsButtonRef = useRef(null);
+      const lastSeenCloudSyncToastIdRef = useRef('');
+      const cloudSyncToastTimerRef = useRef(null);
+      const clearCloudSyncToastTimer = useCallback(() => {
+        if (cloudSyncToastTimerRef.current) {
+          const cancel = typeof window !== 'undefined' && typeof window.clearTimeout === 'function'
+            ? window.clearTimeout.bind(window)
+            : clearTimeout;
+          cancel(cloudSyncToastTimerRef.current);
+          cloudSyncToastTimerRef.current = null;
+        }
+      }, []);
+      useEffect(() => () => {
+        clearCloudSyncToastTimer();
+      }, [clearCloudSyncToastTimer]);
       useEffect(() => {
         if (topbarCollapsed || !compactMobile) setMobileToolsOpen(false);
       }, [topbarCollapsed, compactMobile]);
@@ -502,6 +546,26 @@
         }
         const nextDeviceIds = new Set((snap.devices || []).map((device) => device.id));
         setStartupCloudSyncNotice(snap.startupCloudSyncNotice || null);
+        if (snap.cloudSyncToast) {
+          const decision = resolveCloudSyncToastDecision(
+            snap.cloudSyncToast,
+            lastSeenCloudSyncToastIdRef.current,
+          );
+          if (decision.action === 'skip_stale') {
+            lastSeenCloudSyncToastIdRef.current = decision.nextLastSeenId;
+          } else if (decision.action === 'show') {
+            lastSeenCloudSyncToastIdRef.current = decision.nextLastSeenId;
+            clearCloudSyncToastTimer();
+            setCloudSyncToast(decision.toast);
+            const schedule = typeof window !== 'undefined' && typeof window.setTimeout === 'function'
+              ? window.setTimeout.bind(window)
+              : setTimeout;
+            cloudSyncToastTimerRef.current = schedule(() => {
+              cloudSyncToastTimerRef.current = null;
+              setCloudSyncToast(null);
+            }, decision.durationMs);
+          }
+        }
         setState({
           self: snap.self,
           devices: snap.devices || [],
@@ -566,7 +630,7 @@
           }));
         }
         return snap;
-      }, []);
+      }, [clearCloudSyncToastTimer]);
 
       // 折叠偏好仅属于当前浏览器，不影响其它设备或 dsh-au 服务端配置。
       useEffect(() => {
@@ -1893,6 +1957,39 @@
                     }, '我知道了')
                   )
                 )
+              ),
+              document.body
+            )
+          : null,
+        cloudSyncToast
+          ? ReactDOM.createPortal(
+              h('div', {
+                className: `dsh-au-global-toast ${cloudSyncToast.status === 'warn' ? 'is-warn' : 'is-ok'}`,
+                role: cloudSyncToast.status === 'warn' ? 'alert' : 'status',
+                'aria-live': 'polite',
+                'data-toast-id': cloudSyncToast.id || '',
+              },
+                h('span', {
+                  className: 'dsh-au-global-toast-icon',
+                  'aria-hidden': 'true',
+                }, cloudSyncToast.status === 'warn' ? '!' : '✓'),
+                h('div', { className: 'dsh-au-global-toast-body' },
+                  cloudSyncToast.title
+                    ? h('div', { className: 'dsh-au-global-toast-title' }, cloudSyncToast.title)
+                    : null,
+                  cloudSyncToast.message
+                    ? h('div', { className: 'dsh-au-global-toast-msg' }, cloudSyncToast.message)
+                    : null
+                ),
+                h('button', {
+                  type: 'button',
+                  className: 'dsh-au-global-toast-close',
+                  'aria-label': '关闭提示',
+                  onClick: () => {
+                    clearCloudSyncToastTimer();
+                    setCloudSyncToast(null);
+                  },
+                }, '×')
               ),
               document.body
             )

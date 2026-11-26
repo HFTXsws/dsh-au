@@ -2773,6 +2773,26 @@ window.__ModuleLoader__.load({
         .dsh-au-startup-sync-footer { display:flex; justify-content:flex-end; gap:8px; padding:12px 20px 16px; border-top:1px solid var(--dsw-alias-border-l1,#262f40); background:rgba(255,255,255,0.015); }
         .dsh-au-startup-sync-footer .dsh-au-btn { min-height:32px; padding:6px 14px; font-size:12.5px; font-weight:500; background:var(--dsw-alias-bg-layer-2,#1f2636); color:var(--dsw-alias-label-primary,#f1f5f9); border-color:var(--dsw-alias-border-l2,rgba(255,255,255,0.14)); }
         .dsh-au-startup-sync-footer .dsh-au-btn:hover { background:var(--dsw-alias-interactive-bg-hover-solid,#2a3347); border-color:var(--dsw-alias-state-business-primary,#60a5fa); color:#ffffff; }
+        /* 全局自动云同步非阻塞 Toast 提示，兼容浅色与暗色主题 */
+        .dsh-au-global-toast { position:fixed; right:20px; bottom:20px; z-index:2147483640; max-width:360px; min-width:240px; display:flex; align-items:flex-start; gap:10px; padding:12px 14px; border-radius:10px; border:1px solid var(--dsw-alias-border-primary,rgba(15,23,42,0.12)); border-left:4px solid var(--dsw-alias-border-primary,rgba(15,23,42,0.28)); background:var(--dsw-alias-bg-elevated,#ffffff); color:var(--dsw-alias-label-primary,#111827); box-shadow:0 12px 32px -6px rgba(15,23,42,0.18), 0 2px 8px rgba(15,23,42,0.08); box-sizing:border-box; animation:dshAuToastIn .22s cubic-bezier(0.16,1,0.3,1) both; }
+        body[data-ds-dark-theme] .dsh-au-global-toast { border-color:var(--dsw-alias-border-primary,#2e3646); background:var(--dsw-alias-bg-elevated,#1a1f2c); color:var(--dsw-alias-label-primary,#f1f5f9); box-shadow:0 14px 36px -6px rgba(0,0,0,0.55), 0 2px 10px rgba(0,0,0,0.3); }
+        .dsh-au-global-toast.is-ok { border-left-color:var(--dsw-alias-state-success-primary,#10b981); }
+        .dsh-au-global-toast.is-warn { border-left-color:var(--dsw-alias-state-warn-primary,#f59e0b); }
+        .dsh-au-global-toast-icon { flex:0 0 18px; width:18px; height:18px; margin-top:1px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; line-height:1; }
+        .dsh-au-global-toast.is-ok .dsh-au-global-toast-icon { background:color-mix(in srgb,var(--dsw-alias-state-success-primary,#10b981) 16%,transparent); color:var(--dsw-alias-state-success-primary,#10b981); }
+        .dsh-au-global-toast.is-warn .dsh-au-global-toast-icon { background:color-mix(in srgb,var(--dsw-alias-state-warn-primary,#f59e0b) 18%,transparent); color:var(--dsw-alias-state-warn-primary,#f59e0b); }
+        .dsh-au-global-toast-body { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:3px; }
+        .dsh-au-global-toast-title { font-size:13px; font-weight:600; line-height:1.4; color:var(--dsw-alias-label-primary,#111827); overflow-wrap:anywhere; }
+        body[data-ds-dark-theme] .dsh-au-global-toast-title { color:var(--dsw-alias-label-primary,#f8fafc); }
+        .dsh-au-global-toast-msg { font-size:12px; line-height:1.5; color:var(--dsw-alias-label-secondary,#475569); white-space:pre-wrap; overflow-wrap:anywhere; }
+        body[data-ds-dark-theme] .dsh-au-global-toast-msg { color:var(--dsw-alias-label-secondary,#cbd5e1); }
+        .dsh-au-global-toast-close { flex:0 0 auto; display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; margin:-2px -4px 0 2px; padding:0; border:1px solid transparent; border-radius:6px; background:transparent; color:var(--dsw-alias-label-secondary,#64748b); cursor:pointer; font-size:16px; line-height:1; transition:background-color .15s, color .15s; }
+        body[data-ds-dark-theme] .dsh-au-global-toast-close { color:var(--dsw-alias-label-secondary,#94a3b8); }
+        .dsh-au-global-toast-close:hover { background:var(--dsw-alias-interactive-bg-hover-solid,rgba(148,163,184,0.16)); color:var(--dsw-alias-label-primary,#111827); }
+        body[data-ds-dark-theme] .dsh-au-global-toast-close:hover { color:var(--dsw-alias-label-primary,#f8fafc); }
+        @keyframes dshAuToastIn { from { opacity:0; transform:translateY(10px) scale(0.98); } to { opacity:1; transform:translateY(0) scale(1); } }
+        @media (prefers-reduced-motion: reduce) { .dsh-au-global-toast { animation:none; } }
+        @media (max-width: 640px) { .dsh-au-global-toast { right:12px; left:12px; bottom:12px; max-width:none; min-width:0; } }
         .dsh-au-shortcut-modal-body > .dsh-au-settings-group > h3,
         .dsh-au-shortcut-modal-body > .dsh-au-settings-group > .dsh-au-settings-desc,
         .dsh-au-model-shortcut-modal-body > .dsh-au-settings-group > h3 { display:none; }
@@ -4344,9 +4364,10 @@ window.__ModuleLoader__.load({
           continue;
         }
 
-        // #11 会设置 Git 钩子目录；用功能语义替代原始 Git 配置键。
-        if (/core\.hooksPath\s*(?:->|→)\s*scripts[\\/]hooks/i.test(line)) {
-          addTile('Git 自动钩子', '已绑定 scripts/hooks', '已启用', 'emerald');
+        // 识别 Git 钩子目录设置；用功能语义替代原始 Git 配置键。
+        const hooksMatch = /core\.hooksPath\s*(?:->|→)\s*(\S+)/i.exec(line);
+        if (hooksMatch) {
+          addTile('Git 自动钩子', `已绑定 ${hooksMatch[1]}`, '已启用', 'emerald');
           continue;
         }
 
@@ -5611,9 +5632,8 @@ window.__ModuleLoader__.load({
 
       const buildPreviewText = (item) => {
         if (!item) return '';
-        const scriptRef = item.resolvedScript || (item.runner === 'platform'
-          ? `scripts/${item.script}${isWin ? '.ps1' : '.sh'}`
-          : `scripts/${item.script}`);
+        const scriptRef = item.resolvedScript
+          || `${item.script}${item.runner === 'platform' ? (isWin ? '.ps1' : '.sh') : ''}`;
         // 与后端 preview 对齐：本机没有 pwsh 时 menuSpec.psCommandName 为 powershell。
         const psName = wb?.menuSpec?.psCommandName || 'pwsh';
         const base = item.runner === 'node'
@@ -6308,8 +6328,8 @@ window.__ModuleLoader__.load({
         h(
           'footer',
           { className: 'dsh-au-wb-foot' },
-          h('span', null, '支持序号直达 (11-71) · 双击无参卡片直接执行 · 后台服务独立于 DSH 运行，支持按电脑保存自启组合'),
-          h('span', null, `本机: ${wb?.selfHostname || 'DSH'} · SSOT: scripts/menu.json`)
+          h('span', null, '支持序号直达 · 双击无参卡片直接执行 · 后台服务独立于 DSH 运行，支持按电脑保存自启组合'),
+          h('span', null, `本机: ${wb?.selfHostname || 'DSH'} · 菜单清单: ${wb?.menuSpec?.sourceLabel || 'menu.json'}`)
         )
       );
 
@@ -7561,6 +7581,35 @@ window.__ModuleLoader__.load({
     }
     // END resolveFloatingCapsuleIpBadge
 
+    const CLOUD_SYNC_TOAST_MAX_AGE_MS = 30_000;
+    const CLOUD_SYNC_TOAST_DURATION_OK_MS = 4000;
+    const CLOUD_SYNC_TOAST_DURATION_WARN_MS = 6000;
+
+    // 全局云同步 Toast 判定：去重、30 秒新鲜度过滤与不同状态自动关闭时长计算
+    function resolveCloudSyncToastDecision(toast, lastSeenId, nowMs = Date.now()) {
+      if (!toast || typeof toast !== 'object') return { action: 'ignore', nextLastSeenId: lastSeenId };
+      const id = typeof toast.id === 'string' ? toast.id : String(toast.id ?? '');
+      if (!id || id === lastSeenId) return { action: 'ignore', nextLastSeenId: lastSeenId };
+      const createdAtMs = toast.createdAt != null && toast.createdAt !== ''
+        ? (typeof toast.createdAt === 'number' ? toast.createdAt : Date.parse(toast.createdAt))
+        : NaN;
+      if (Number.isFinite(createdAtMs) && (nowMs - createdAtMs) > CLOUD_SYNC_TOAST_MAX_AGE_MS) {
+        return { action: 'skip_stale', nextLastSeenId: id };
+      }
+      const status = toast.status === 'warn' ? 'warn' : 'ok';
+      const durationMs = status === 'warn'
+        ? CLOUD_SYNC_TOAST_DURATION_WARN_MS
+        : CLOUD_SYNC_TOAST_DURATION_OK_MS;
+      return {
+        action: 'show',
+        nextLastSeenId: id,
+        toast,
+        status,
+        durationMs,
+      };
+    }
+    // END resolveCloudSyncToastDecision
+
     function planScreenLockRemoteFrames({
       enabled,
       wasEnabled,
@@ -8016,7 +8065,22 @@ window.__ModuleLoader__.load({
       const [dismissedCloudSyncNoticeId, setDismissedCloudSyncNoticeId] = useState('');
       const [cloudSyncNoticeBusy, setCloudSyncNoticeBusy] = useState(false);
       const [cloudSyncNoticeFeedback, setCloudSyncNoticeFeedback] = useState('');
+      const [cloudSyncToast, setCloudSyncToast] = useState(null);
       const mobileToolsButtonRef = useRef(null);
+      const lastSeenCloudSyncToastIdRef = useRef('');
+      const cloudSyncToastTimerRef = useRef(null);
+      const clearCloudSyncToastTimer = useCallback(() => {
+        if (cloudSyncToastTimerRef.current) {
+          const cancel = typeof window !== 'undefined' && typeof window.clearTimeout === 'function'
+            ? window.clearTimeout.bind(window)
+            : clearTimeout;
+          cancel(cloudSyncToastTimerRef.current);
+          cloudSyncToastTimerRef.current = null;
+        }
+      }, []);
+      useEffect(() => () => {
+        clearCloudSyncToastTimer();
+      }, [clearCloudSyncToastTimer]);
       useEffect(() => {
         if (topbarCollapsed || !compactMobile) setMobileToolsOpen(false);
       }, [topbarCollapsed, compactMobile]);
@@ -8035,6 +8099,26 @@ window.__ModuleLoader__.load({
         }
         const nextDeviceIds = new Set((snap.devices || []).map((device) => device.id));
         setStartupCloudSyncNotice(snap.startupCloudSyncNotice || null);
+        if (snap.cloudSyncToast) {
+          const decision = resolveCloudSyncToastDecision(
+            snap.cloudSyncToast,
+            lastSeenCloudSyncToastIdRef.current,
+          );
+          if (decision.action === 'skip_stale') {
+            lastSeenCloudSyncToastIdRef.current = decision.nextLastSeenId;
+          } else if (decision.action === 'show') {
+            lastSeenCloudSyncToastIdRef.current = decision.nextLastSeenId;
+            clearCloudSyncToastTimer();
+            setCloudSyncToast(decision.toast);
+            const schedule = typeof window !== 'undefined' && typeof window.setTimeout === 'function'
+              ? window.setTimeout.bind(window)
+              : setTimeout;
+            cloudSyncToastTimerRef.current = schedule(() => {
+              cloudSyncToastTimerRef.current = null;
+              setCloudSyncToast(null);
+            }, decision.durationMs);
+          }
+        }
         setState({
           self: snap.self,
           devices: snap.devices || [],
@@ -8099,7 +8183,7 @@ window.__ModuleLoader__.load({
           }));
         }
         return snap;
-      }, []);
+      }, [clearCloudSyncToastTimer]);
 
       // 折叠偏好仅属于当前浏览器，不影响其它设备或 dsh-au 服务端配置。
       useEffect(() => {
@@ -9429,6 +9513,39 @@ window.__ModuleLoader__.load({
               ),
               document.body
             )
+          : null,
+        cloudSyncToast
+          ? ReactDOM.createPortal(
+              h('div', {
+                className: `dsh-au-global-toast ${cloudSyncToast.status === 'warn' ? 'is-warn' : 'is-ok'}`,
+                role: cloudSyncToast.status === 'warn' ? 'alert' : 'status',
+                'aria-live': 'polite',
+                'data-toast-id': cloudSyncToast.id || '',
+              },
+                h('span', {
+                  className: 'dsh-au-global-toast-icon',
+                  'aria-hidden': 'true',
+                }, cloudSyncToast.status === 'warn' ? '!' : '✓'),
+                h('div', { className: 'dsh-au-global-toast-body' },
+                  cloudSyncToast.title
+                    ? h('div', { className: 'dsh-au-global-toast-title' }, cloudSyncToast.title)
+                    : null,
+                  cloudSyncToast.message
+                    ? h('div', { className: 'dsh-au-global-toast-msg' }, cloudSyncToast.message)
+                    : null
+                ),
+                h('button', {
+                  type: 'button',
+                  className: 'dsh-au-global-toast-close',
+                  'aria-label': '关闭提示',
+                  onClick: () => {
+                    clearCloudSyncToastTimer();
+                    setCloudSyncToast(null);
+                  },
+                }, '×')
+              ),
+              document.body
+            )
           : null
       );
     }
@@ -10649,7 +10766,7 @@ window.__ModuleLoader__.load({
       );
     }
 
-    /** 服务端未返回前的兜底同步项（7 项非模型官方配置 + 5 项模型子项，共 12 项；对比细节以服务端为准）。 */
+    /** 服务端未返回前的兜底同步项（7 项非模型官方配置 + 4 项模型子项，共 11 项；对比细节以服务端为准）。 */
     const FALLBACK_CLOUD_SYNC_ITEMS = [
       { id: 'ui-theme', title: '外观：字号', patchIds: ['ui-theme'], comparisons: [] },
       { id: 'ui-chat', title: '聊天内容展示', patchIds: ['ui-chat'], comparisons: [] },
@@ -10659,7 +10776,6 @@ window.__ModuleLoader__.load({
       { id: 'permission-preset', title: '权限：新会话的默认权限模式', patchIds: ['permission'], comparisons: [] },
       { id: 'desktop-preferences', title: '桌面设置：后台运行、浏览器与局域网、桌面通知', patchIds: [], isDesktopPreferences: true, comparisons: [] },
       { id: 'llm-pi-ai', title: '模型提供商', category: 'models', nonOfficial: true, patchIds: ['llm-pi-ai'], comparisons: [] },
-      { id: 'agent-default-model', title: '默认模型', category: 'models', nonOfficial: true, patchIds: ['agent-default-model'], comparisons: [] },
       { id: 'claude-launcher', title: 'Claude 启动器与 4 档位映射', category: 'models', nonOfficial: true, patchIds: [], comparisons: [] },
       { id: 'codex-catalog', title: 'Codex 模型目录', category: 'models', nonOfficial: true, patchIds: [], comparisons: [] },
       { id: 'dsh-acp-adapter', title: 'Cursor ACP 适配器', category: 'models', nonOfficial: true, patchIds: ['dsh-acp-adapter'], comparisons: [] },
@@ -10668,7 +10784,6 @@ window.__ModuleLoader__.load({
     /** 模型配置大类包含的子项 ID */
     const MODEL_CONFIG_ITEM_IDS = new Set([
       'llm-pi-ai',
-      'agent-default-model',
       'claude-launcher',
       'codex-catalog',
       'dsh-acp-adapter',
@@ -11255,16 +11370,40 @@ window.__ModuleLoader__.load({
 
       const hasConflictOrDiff = conflictRows.length > 0 || Boolean(cloudSync.conflict);
 
-      const handleResolveRow = (row, direction) => {
+      const handleResolveRow = async (row, direction) => {
         if (busy) return;
         if (typeof onResolveConflict === 'function') {
-          void onResolveConflict({ kind: row.kind, id: row.id, direction, profile });
-          showToast(direction === 'push' ? `✓ 已将「${row.title}」用本机覆盖云端` : `✓ 已将「${row.title}」用云端覆盖本机`);
+          try {
+            const res = await onResolveConflict({ kind: row.kind, id: row.id, direction, profile });
+            if (res && res.ok === false) {
+              showToast(res.error || '处理冲突失败', true);
+              return;
+            }
+            if (res && res.skipped) {
+              showToast(res.message || '未执行覆盖（已跳过）', true);
+              return;
+            }
+            showToast(direction === 'push' ? `✓ 已将「${row.title}」用本机覆盖云端` : `✓ 已将「${row.title}」用云端覆盖本机`);
+          } catch (err) {
+            showToast(err?.message || '处理冲突异常', true);
+          }
           return;
         }
         if (row.kind === 'plugin' && typeof onSyncSinglePlugin === 'function') {
-          void onSyncSinglePlugin({ profile, pluginId: row.id, direction });
-          showToast(direction === 'push' ? `✓ 已将「${row.title}」推送到云` : `✓ 已将「${row.title}」同步到本地`);
+          try {
+            const res = await onSyncSinglePlugin({ profile, pluginId: row.id, direction });
+            if (res && res.ok === false) {
+              showToast(res.error || '单插件同步失败', true);
+              return;
+            }
+            if (res && res.skipped) {
+              showToast(res.message || '未执行同步（已跳过）', true);
+              return;
+            }
+            showToast(direction === 'push' ? `✓ 已将「${row.title}」推送到云` : `✓ 已将「${row.title}」同步到本地`);
+          } catch (err) {
+            showToast(err?.message || '单插件同步异常', true);
+          }
           return;
         }
         if (direction === 'push' && typeof onPushToRepo === 'function') {
@@ -11329,7 +11468,7 @@ window.__ModuleLoader__.load({
       };
 
       const footerToastText = toast?.text || message || '';
-      const footerToastError = Boolean(toast?.isError || (!toast && message && /失败|异常|错误/.test(message)));
+      const footerToastError = Boolean(toast?.isError || (!toast && message && /失败|异常|错误|未声明|不存在|未配置|已跳过/.test(message)));
 
       return h(
         'div',
@@ -12159,11 +12298,15 @@ window.__ModuleLoader__.load({
               if (typeof loadModelShortcuts === 'function') void loadModelShortcuts();
             }
             setMessage(res.message || (direction === 'push' ? '已用本机覆盖云端' : '已用云端覆盖本机'));
+            return { ok: true, skipped: Boolean(res.skipped), message: res.message || '' };
           } else {
-            setMessage(res?.error || '处理冲突失败');
+            const err = res?.error || '处理冲突失败';
+            setMessage(err);
+            return { ok: false, skipped: false, error: err };
           }
         } catch {
           setMessage('处理冲突异常');
+          return { ok: false, skipped: false, error: '处理冲突异常' };
         } finally {
           setBusy(false);
         }
@@ -12186,12 +12329,16 @@ window.__ModuleLoader__.load({
           if (res?.ok) {
             applyCloudSyncResponse(res);
             if (direction === 'pull') void loadFeatures();
-            setMessage(direction === 'push' ? `已将 ${pluginId} 本地状态推送到云` : `已将 ${pluginId} 从云同步到本地`);
+            setMessage(res.message || (direction === 'push' ? `已将 ${pluginId} 本地状态推送到云` : `已将 ${pluginId} 从云同步到本地`));
+            return { ok: true, skipped: Boolean(res.skipped), message: res.message || '' };
           } else {
-            setMessage(res?.error || '单插件同步失败');
+            const err = res?.error || '单插件同步失败';
+            setMessage(err);
+            return { ok: false, skipped: false, error: err };
           }
         } catch {
           setMessage('单插件同步异常');
+          return { ok: false, skipped: false, error: '单插件同步异常' };
         } finally {
           setBusy(false);
         }

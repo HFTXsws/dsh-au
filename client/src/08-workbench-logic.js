@@ -144,9 +144,10 @@
           continue;
         }
 
-        // #11 会设置 Git 钩子目录；用功能语义替代原始 Git 配置键。
-        if (/core\.hooksPath\s*(?:->|→)\s*scripts[\\/]hooks/i.test(line)) {
-          addTile('Git 自动钩子', '已绑定 scripts/hooks', '已启用', 'emerald');
+        // 识别 Git 钩子目录设置；用功能语义替代原始 Git 配置键。
+        const hooksMatch = /core\.hooksPath\s*(?:->|→)\s*(\S+)/i.exec(line);
+        if (hooksMatch) {
+          addTile('Git 自动钩子', `已绑定 ${hooksMatch[1]}`, '已启用', 'emerald');
           continue;
         }
 
