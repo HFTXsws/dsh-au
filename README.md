@@ -83,7 +83,7 @@ npm run doctor -- --extensions
 - 多机同步、服务/远程设备/云插件注册：[sync/README.md](sync/README.md)
 - 模型快捷切换与排序说明：[docs/模型快捷切换界面与排序说明.md](docs/模型快捷切换界面与排序说明.md)
 - 远端模型快捷切换兼容说明：[docs/远端模型快捷切换兼容说明.md](docs/远端模型快捷切换兼容说明.md)
-- 私人工作台扩展页契约：[docs/wiki/domain/private-extensions-contract.md](docs/wiki/domain/private-extensions-contract.md)
+- 私人工作台扩展页说明：[sync/README.md（工作台私人扩展）](sync/README.md#工作台私人扩展extensions)
 
 ## Codex：新建或继续 DSH 会话
 

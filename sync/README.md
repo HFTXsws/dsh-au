@@ -255,7 +255,7 @@ sync/
 - `styles.css`（可选）：自动注入工作台样式
 - `server.js`（可选）：导出 `export async function handleAction({ action, body, ctx })`，通过 `/dsh-au/api` 的 `extAction` 转发调用
 
-完整字段契约与新增页面步骤见 `docs/wiki/domain/private-extensions-contract.md`；写完后运行 `npm run doctor -- --extensions` 自检。
+写完后运行 `npm run doctor -- --extensions` 自检；详细扩展契约可维护在你的私人同步仓库 `<syncRepoRoot>/docs/wiki/domain/private-extensions-contract.md`。
 
 
 ## 常见错误

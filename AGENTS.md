@@ -1,14 +1,10 @@
-## 知识库（Wiki）
+## 知识库（Wiki）— 仅存私人同步仓库，禁止落盘本开源仓
 
-项目知识在 `docs/wiki/`。
+本仓库为**开源项目**。为防止真实域名、设备名、绝对路径、内网 IP、私人仓库名或凭据意外混入开源提交，**本仓库不维护 `docs/wiki/`，严禁在本仓库新建或写入任何 Wiki 页面**。
 
-- 约定：`docs/wiki/SCHEMA.md`
-- 入口：`docs/wiki/index.md`
-- 时间线：`docs/wiki/log.md`
-
-需要项目知识时，先读 `index.md`，再读具体页。不要每次从源码重新推。
-对话里出现「下次还会踩」的结论，列出候选页，确认后再写回。
-- **严禁写入隐私内容**：不得在 `docs/wiki/` 中记录真实域名、个人设备/主机名、本机绝对路径（含用户名或盘符项目目录）、私人仓库名或路径、内网 IP、Token/密钥或账号凭据；示例统一使用 `example.com`、`<device>`、`<syncRepoRoot>` 等占位符。
+- **唯一 Wiki 位置**：维护者的私人同步仓库 `<syncRepoRoot>/docs/wiki/`（包含 `SCHEMA.md`、`index.md`、`log.md` 与具体页）。
+- **如何定位 `<syncRepoRoot>`**：依次读取 `~/.dsh/dsh-au.config.json` 中的 `syncRepoRoot` 字段，或环境变量 `DSH_AU_SYNC_REPO`；若本机未配置私人同步仓库（例如外部协作者环境），则跳过 Wiki，直接以本仓库 `README.md`、`sync/README.md` 与源码为准。
+- **读写规范**：需要项目历史背景、架构取舍或踩坑记录时，先读 `<syncRepoRoot>/docs/wiki/index.md` 再读具体页；对话里出现「下次还会踩」的结论，列出候选页，经用户确认后写回 `<syncRepoRoot>/docs/wiki/`（绝不写入本开源仓库）。
 
 ## Git 提交署名自检
 
@@ -20,6 +16,6 @@
 
 ## 前端构建校验（Windows CRLF）
 
-- 若 `npm test` / `npm run check:client` 报错 `client/client.js 与 client/src 不一致`，先执行 `npm run build:client` 再重跑 `npm test`（详情见 `docs/wiki/gotchas/windows-client-bundle-crlf-check.md`）。
+- 若 `npm test` / `npm run check:client` 报错 `client/client.js 与 client/src 不一致`，先执行 `npm run build:client` 再重跑 `npm test`（详情见 `<syncRepoRoot>/docs/wiki/gotchas/windows-client-bundle-crlf-check.md`）。
 - 构建后若仅因 CRLF/LF 差异导致 `git add client/client.js` 无实质变更，无需额外提交。
 
