@@ -25,11 +25,11 @@ import {
 import { useTempSyncRepo } from './helpers/temp-sync-repo.mjs';
 
 const SPLIT_UI_IDS = ['ui-theme', 'ui-chat', 'ui-settings-account', 'session-log-deepseek'];
-const SPLIT_MODEL_IDS = ['llm-pi-ai', 'agent-default-model', 'claude-launcher', 'codex-catalog', 'dsh-acp-adapter'];
+const SPLIT_MODEL_IDS = ['llm-pi-ai', 'claude-launcher', 'codex-catalog', 'dsh-acp-adapter'];
 const FIXED_PATCH_BACKED_IDS = [
   'ui-theme', 'ui-chat', 'ui-settings-account', 'session-log-deepseek',
   'subagent-models', 'permission-preset',
-  'llm-pi-ai', 'agent-default-model', 'dsh-acp-adapter',
+  'llm-pi-ai', 'dsh-acp-adapter',
 ];
 
 const FOO_BLOCK = [
@@ -92,11 +92,11 @@ function makeSyncFixture(t, { localPatch = '', cloudPatch = '' } = {}) {
   return { repoRoot, dshHome, profileDir, repoDshDir };
 }
 
-test('OFFICIAL_SYNC_ITEMS：拆分后的 12 个固定项按顺序排列，且 patchIds 映射正确', () => {
+test('OFFICIAL_SYNC_ITEMS：拆分后的 11 个固定项按顺序排列，且 patchIds 映射正确（不含默认模型）', () => {
   assert.deepEqual(ALL_OFFICIAL_SYNC_ITEM_IDS, [
     'ui-theme', 'ui-chat', 'ui-settings-account', 'session-log-deepseek',
     'subagent-models', 'permission-preset',
-    'llm-pi-ai', 'agent-default-model', 'claude-launcher', 'codex-catalog', 'dsh-acp-adapter',
+    'llm-pi-ai', 'claude-launcher', 'codex-catalog', 'dsh-acp-adapter',
     'desktop-preferences',
   ]);
   const byId = Object.fromEntries(OFFICIAL_SYNC_ITEMS.map((i) => [i.id, i]));
@@ -107,7 +107,7 @@ test('OFFICIAL_SYNC_ITEMS：拆分后的 12 个固定项按顺序排列，且 pa
   assert.deepEqual(byId['subagent-models'].patchIds, ['subagent-model-selection-settings']);
   assert.deepEqual(byId['permission-preset'].patchIds, ['permission']);
   assert.deepEqual(byId['llm-pi-ai'].patchIds, ['llm-pi-ai']);
-  assert.deepEqual(byId['agent-default-model'].patchIds, ['agent-default-model']);
+  assert.equal(byId['agent-default-model'], undefined);
   assert.deepEqual(byId['claude-launcher'].patchIds, []);
   assert.equal(byId['claude-launcher'].isClaudeLauncher, true);
   assert.deepEqual(byId['codex-catalog'].patchIds, []);
@@ -137,11 +137,11 @@ test('旧 ID 展开：normalizeCloudSyncConfig 与 resolveSelectedPatchIds 把 g
   for (const id of SPLIT_UI_IDS) assert.ok(fromLegacy.has(id), `应含 block ${id}`);
   assert.ok(!fromLegacy.has('permission'));
 
-  // 固定项与 patch:<blockId> 的映射（含 legacy llm-providers 自动展开）
+  // 固定项与 patch:<blockId> 的映射（含 legacy llm-providers 自动展开，不含默认模型）
   const mixed = resolveSelectedPatchIds(['llm-providers', 'subagent-models', 'patch:dsh-client-ui-foo']);
   assert.deepEqual(
     [...mixed].sort(),
-    ['agent-default-model', 'dsh-acp-adapter', 'dsh-client-ui-foo', 'llm-pi-ai', 'subagent-model-selection-settings'],
+    ['dsh-acp-adapter', 'dsh-client-ui-foo', 'llm-pi-ai', 'subagent-model-selection-settings'],
   );
 });
 
@@ -412,12 +412,12 @@ test('claude-launcher 白名单同步：推送与拉取不泄密 ANTHROPIC_AUTH_
   assert.equal(cloudJson.ANTHROPIC_MODEL, 'claude-sonnet-4-6');
   assert.equal(cloudJson.ANTHROPIC_DEFAULT_OPUS_MODEL, 'claude-opus-4-6');
   assert.equal(cloudJson.effort, 'high');
-  assert.equal(cloudJson.gateway, 'GBU');
+  assert.equal(cloudJson.gateway, undefined);
 
   // 云端修改后，本机哈希与云端哈希一致性检查 + 拉取回写保留本机凭据
   const itemsInSync = Object.fromEntries(buildOfficialSyncItems({ repoRoot, dshHome, profile: 'kiro' }).map((i) => [i.id, i]));
   assert.equal(itemsInSync['claude-launcher'].inSync, true);
-  assert.equal(itemsInSync['claude-launcher'].summary, '当前网关：GBU');
+  assert.equal(itemsInSync['claude-launcher'].summary, '5 档位已配置');
   assert.equal(itemsInSync['claude-launcher'].detailTags.length, 5);
   assert.ok(itemsInSync['claude-launcher'].diffLines.every((l) => l.changed === false));
 

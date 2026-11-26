@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -37,7 +37,15 @@ export function useTempSyncRepo(t, prefix) {
 }
 
 export function copyMenuFixture(repoRoot) {
-  copyFileSync(path.join(FIXTURES, 'menu.json'), path.join(repoRoot, 'scripts', 'menu.json'));
+  const syncDir = existsSync(path.join(repoRoot, 'dsh-sync'))
+    ? path.join(repoRoot, 'dsh-sync')
+    : path.join(repoRoot, 'dsh-au', 'sync');
+  mkdirSync(syncDir, { recursive: true });
+  const raw = JSON.parse(readFileSync(path.join(FIXTURES, 'menu.json'), 'utf8'));
+  writeFileSync(path.join(syncDir, 'menu.json'), `${JSON.stringify({
+    ...raw,
+    scriptBaseDir: raw.scriptBaseDir || 'scripts',
+  }, null, 2)}\n`, 'utf8');
 }
 
 export function copyRestoreMock(repoRoot) {

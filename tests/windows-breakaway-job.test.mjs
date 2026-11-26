@@ -8,21 +8,38 @@ import path from 'node:path';
 // Regression: DSH's Windows Job Object reclaimed managed services after DSH restarted.
 test('Windows runtime and boot launchers break managed services away from the DSH Job Object', async () => {
   const root = mkdtempSync(path.join(tmpdir(), 'dsh-au-breakaway-'));
-  const auwinRoot = path.join(root, 'AuWin');
+  const ctrlRoot = path.join(root, 'Controller');
   const startupDir = path.join(root, 'startup');
   const bindingPath = path.join(root, 'machine.json');
-  const envNames = ['DSH_AU_AUWIN_ROOT', 'DSH_AU_STARTUP_DIR', 'DSH_AU_LOCAL_BINDINGS_PATH'];
+  const cloudManifestPath = path.join(root, 'manifest.cloud.json');
+  const envNames = [
+    'DSH_AU_CONTROLLER_ROOT', 'DSH_AU_AUWIN_ROOT', 'DSH_AU_CONTROLLER_MODULE',
+    'DSH_AU_CONTROLLER_ENTRY', 'DSH_AU_CLOUD_MANIFEST_PATH',
+    'DSH_AU_STARTUP_DIR', 'DSH_AU_LOCAL_BINDINGS_PATH', 'DSH_AU_CONFIG_PATH',
+  ];
   const previousEnv = Object.fromEntries(envNames.map((name) => [name, process.env[name]]));
 
   try {
-    mkdirSync(path.join(auwinRoot, 'backend', 'lanmiao'), { recursive: true });
-    writeFileSync(path.join(auwinRoot, 'backend', 'lanmiao', 'background_services.py'), '# test fixture\n', 'utf8');
+    mkdirSync(path.join(ctrlRoot, 'custom', 'controller'), { recursive: true });
+    writeFileSync(path.join(ctrlRoot, 'custom', 'controller', 'services.py'), '# test fixture\n', 'utf8');
+    writeFileSync(cloudManifestPath, JSON.stringify({
+      schemaVersion: 1,
+      services: {},
+      devices: [],
+      plugins: {},
+      controller: { module: 'custom.controller.services' },
+    }), 'utf8');
     writeFileSync(bindingPath, JSON.stringify({
       schemaVersion: 2,
       machineId: 'breakaway-test',
-      services: { dsh_bridge: { controller: 'auwin' } },
+      services: { dsh_bridge: { controller: 'external' } },
     }), 'utf8');
-    process.env.DSH_AU_AUWIN_ROOT = auwinRoot;
+    delete process.env.DSH_AU_AUWIN_ROOT;
+    delete process.env.DSH_AU_CONTROLLER_MODULE;
+    delete process.env.DSH_AU_CONTROLLER_ENTRY;
+    process.env.DSH_AU_CONFIG_PATH = path.join(root, 'missing-config.json');
+    process.env.DSH_AU_CONTROLLER_ROOT = ctrlRoot;
+    process.env.DSH_AU_CLOUD_MANIFEST_PATH = cloudManifestPath;
     process.env.DSH_AU_STARTUP_DIR = startupDir;
     process.env.DSH_AU_LOCAL_BINDINGS_PATH = bindingPath;
 
@@ -73,6 +90,8 @@ test('Windows runtime and boot launchers break managed services away from the DS
       vbs,
       /creationflags.+\| getattr\(subprocess, 'CREATE_BREAKAWAY_FROM_JOB', 0x01000000\)/,
     );
+    assert.match(vbs, /importlib\.import_module\('custom\.controller\.services'\)/);
+    assert.doesNotMatch(vbs, /lanmiao/);
   } finally {
     for (const [name, value] of Object.entries(previousEnv)) {
       if (value === undefined) delete process.env[name];

@@ -5,10 +5,15 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test, { after } from 'node:test';
 
-// Isolate AuWin root before import; nothing targets the real LaunchAgent.
+// Isolate controller root before import; nothing targets the real LaunchAgent.
 const root = mkdtempSync(path.join(tmpdir(), 'dsh-au-macos-test-'));
 const env = {
-  HOME: path.join(root, 'home'), DSH_AU_AUWIN_ROOT: path.join(root, 'AuWin'),
+  HOME: path.join(root, 'home'),
+  DSH_AU_CONTROLLER_ROOT: path.join(root, 'Controller'),
+  DSH_AU_AUWIN_ROOT: undefined,
+  DSH_AU_CONTROLLER_MODULE: undefined,
+  DSH_AU_CONTROLLER_ENTRY: undefined,
+  DSH_AU_CONTROLLER_WORKER_MODULE: undefined,
   DSH_AU_LOCAL_DIR: path.join(root, 'local'), DSH_AU_MACHINES_DIR: path.join(root, 'machines'),
   DSH_AU_LOCAL_POINTER_PATH: path.join(root, 'active.json'), DSH_AU_LOCAL_STATE_PATH: path.join(root, 'state.json'),
   DSH_AU_CONFIG_PATH: path.join(root, 'config.json'), DSH_AU_CLOUD_MANIFEST_PATH: path.join(root, 'cloud.json'),
@@ -19,10 +24,14 @@ const previous = Object.keys(env).map((key) => [key, process.env[key]]);
 for (const [key, value] of Object.entries(env)) {
   if (value === undefined) delete process.env[key]; else process.env[key] = value;
 }
-const controller = path.join(env.DSH_AU_AUWIN_ROOT, 'backend', 'lanmiao', 'background_services.py');
+const controller = path.join(env.DSH_AU_CONTROLLER_ROOT, 'custom', 'controller', 'services.py');
 mkdirSync(path.dirname(controller), { recursive: true });
 writeFileSync(controller, '# Never executed test fixture\n');
-writeFileSync(env.DSH_AU_CLOUD_MANIFEST_PATH, JSON.stringify({ services: {}, devices: [] }));
+writeFileSync(env.DSH_AU_CLOUD_MANIFEST_PATH, JSON.stringify({
+  services: {},
+  devices: [],
+  controller: { module: 'custom.controller.services' },
+}));
 const api = await import('../lib/background-services.js');
 const { machineFilePath, writeActivePointer } = await import('../lib/local-bindings.js');
 after(() => {
@@ -189,8 +198,8 @@ test('native boot preserves original plist and handles native synchronization fa
 
 test('Mac Workers and Windows built-ins use controller only while module exists', () => {
   const bindings = {
-    cursor_workers: { controller: 'auwin' },
-    svc_mount: { controller: 'auwin' },
+    cursor_workers: { controller: 'external' },
+    svc_mount: { platformController: 'custom' },
   };
   for (const [id, platform, preferScriptRunner, expected] of [
     ['cursor_workers', 'darwin', false, true], ['cursor_workers', 'darwin', true, false],

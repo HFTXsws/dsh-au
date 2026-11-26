@@ -1277,7 +1277,8 @@ test('旧本机服务档不再接入服务，后台服务退出保护仍生效',
     assert.doesNotMatch(bgSrc, /MACOS_BOOT_CONTROL_IDS/);
     assert.match(bgSrc, /MACOS_LAUNCHD_BOOT_IDS = new Set\(\['cloudflared'\]\)/);
     assert.match(bgSrc, /MACOS_USER_LAUNCHD_CONTROLS = \{/);
-    assert.match(bgSrc, /function bindingPrefersAuWin/);
+    assert.match(bgSrc, /function bindingPrefersController/);
+    assert.doesNotMatch(bgSrc, /lanmiao|cursor_worker\.py|cursor_workers\.json|<AuOS>/);
     assert.match(bgSrc, /async function settleControlResult/);
     assert.match(bgSrc, /启动后仍未运行/);
     assert.match(clientSrc, /开机自启未写入系统 LaunchDaemon/);
@@ -1287,6 +1288,7 @@ test('旧本机服务档不再接入服务，后台服务退出保护仍生效',
     assert.match(bgSrc, /WIN_HEADLESS_POPEN_PATCH/);
     assert.doesNotMatch(bgSrc, /detached:\s*true/);
     const runnerSrc = readFileSync(new URL('../lib/menu-runner.js', import.meta.url), 'utf8');
+    assert.doesNotMatch(runnerSrc, /scripts\/menu\.json|scripts',\s*'menu\.json/);
     assert.match(runnerSrc, /\/\/ 每次执行命令前先清空上一轮日志\s*logs = \[\];/);
     // 回归：Windows 图形宿主必须经 cmd start 新建可见系统终端，不能直接脱离启动 powershell.exe。
     assert.match(runnerSrc, /spawn\('cmd\.exe', \[\s*'\/d',\s*'\/c',\s*'start'/);
@@ -1568,9 +1570,18 @@ test('machine host aliases resolve case-insensitively and Mac only lists enabled
   assert.equal(isServiceListedForMachine({ id: 'svc_mount', drive: 'Q:' }, 'darwin', macEnabled), false);
   assert.equal(isServiceListedForMachine({ id: 'svc_mount', drive: 'Q:' }, 'win32', ['svc_mount']), true);
   assert.equal(isServiceListedForMachine({ id: 'svc_mount', drive: 'Q:' }, 'win32', []), true);
-  const resolved = resolveServiceConfigPath('<AuOS>/AuWin/backend/app.py');
-  assert.match(resolved.replaceAll('\\', '/'), /AuWin\/backend\/app\.py$/);
-  assert.doesNotMatch(resolved, /<AuOS>/);
+  const ctrlParentDir = mkdtempSync(join(tmpdir(), 'dsh-au-ctrl-parent-'));
+  const prevCtrlRoot = process.env.DSH_AU_CONTROLLER_ROOT;
+  process.env.DSH_AU_CONTROLLER_ROOT = join(ctrlParentDir, 'Controller');
+  try {
+    const resolved = resolveServiceConfigPath('<ControllerParent>/Controller/backend/app.py');
+    assert.equal(resolved.replaceAll('\\', '/'), `${ctrlParentDir.replaceAll('\\', '/')}/Controller/backend/app.py`);
+    assert.doesNotMatch(resolved, /<ControllerParent>/);
+  } finally {
+    if (prevCtrlRoot === undefined) delete process.env.DSH_AU_CONTROLLER_ROOT;
+    else process.env.DSH_AU_CONTROLLER_ROOT = prevCtrlRoot;
+    rmSync(ctrlParentDir, { recursive: true, force: true });
+  }
 });
 
 test('旧本机服务档不能接入服务，云服务仍只来自云清单', () => {

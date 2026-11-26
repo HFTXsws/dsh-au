@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -13,7 +13,7 @@ import {
 } from '../lib/menu-runner.js';
 import { syncRepoUnavailableMessage } from '../lib/sync-repo.js';
 
-const ENV_KEYS = ['DSH_AU_SYNC_REPO', 'DSH_AU_CONFIG_PATH'];
+const ENV_KEYS = ['DSH_AU_SYNC_REPO', 'DSH_AU_CONFIG_PATH', 'DSH_AU_PROFILES_MANIFEST_PATH'];
 
 function isolateSyncEnv(t, extra = {}) {
   const saved = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]));
@@ -35,16 +35,51 @@ test('未配置私人同步仓库时菜单直接降级，不读插件目录', (t
   assert.equal(spec.configured, false);
   assert.equal(spec.message, syncRepoUnavailableMessage());
   assert.deepEqual(spec.groups, []);
+  assert.equal(spec.sourceLabel, '');
   assert.equal(spec.psCommandName === 'pwsh' || spec.psCommandName === 'powershell', true);
 });
 
-test('配置了私人仓库时优先读 sync/menu.json，否则回退 scripts/menu.json', (t) => {
+test('只读 sync/menu.json 或清单 menuFile，绝不回退 scripts/menu.json', (t) => {
   const { root, syncDir } = useTempSyncRepo(t, 'dsh-au-menu-sync-json-');
-  copyMenuFixture(root);
-  const fromScripts = loadMenuSpec('win32');
-  assert.equal(fromScripts.configured, true);
-  assert.equal(fromScripts.groups[0].items[0].code, '11');
+  writeFileSync(path.join(root, 'scripts', 'menu.json'), JSON.stringify({
+    version: 1,
+    groups: [{ title: '旧脚本目录菜单', items: [{ code: '11', label: '旧项', script: 'init', runner: 'platform' }] }],
+  }));
 
+  const emptyWhenMissing = loadMenuSpec('win32');
+  assert.equal(emptyWhenMissing.configured, true);
+  assert.deepEqual(emptyWhenMissing.groups, []);
+  assert.equal(emptyWhenMissing.sourceLabel, '');
+
+  // 含 .. 的 menuFile 必须被安全拒绝。
+  writeFileSync(path.join(syncDir, 'cloud', 'dsh-profiles.json'), JSON.stringify({
+    menuFile: '../outside/menu.json',
+    profiles: [{ id: 'default', file: 'p.json' }],
+  }));
+  const rejectedTraversal = loadMenuSpec('win32');
+  assert.deepEqual(rejectedTraversal.groups, []);
+  assert.equal(rejectedTraversal.sourceLabel, '');
+
+  // 清单声明合法仓库相对 menuFile 时读取该文件。
+  mkdirSync(path.join(root, 'custom'), { recursive: true });
+  writeFileSync(path.join(root, 'custom', 'custom-menu.json'), JSON.stringify({
+    version: 1,
+    scriptBaseDir: ' /custom-scripts/ ',
+    groups: [{ title: '清单声明菜单', items: [{ code: '55', label: '声明项', script: 'task.mjs', runner: 'node' }] }],
+  }));
+  writeFileSync(path.join(syncDir, 'cloud', 'dsh-profiles.json'), JSON.stringify({
+    menuFile: 'custom/custom-menu.json',
+    profiles: [{ id: 'default', file: 'p.json' }],
+  }));
+  const fromManifest = loadMenuSpec('win32');
+  assert.equal(fromManifest.groups[0].title, '清单声明菜单');
+  assert.equal(fromManifest.groups[0].items[0].code, '55');
+  assert.equal(fromManifest.groups[0].items[0].scriptBaseDir, 'custom-scripts');
+  assert.equal(fromManifest.groups[0].items[0].resolvedScript, 'custom-scripts/task.mjs');
+  assert.equal(fromManifest.sourceLabel, 'custom/custom-menu.json');
+  assert.equal(buildMenuCommandArgs(fromManifest.groups[0].items[0], {}, 'win32').preview, 'node custom-scripts/task.mjs');
+
+  // sync/menu.json 存在时优先级高于 dsh-profiles.json 的 menuFile。
   writeFileSync(path.join(syncDir, 'menu.json'), JSON.stringify({
     version: 1,
     groups: [{ title: '同步目录菜单', items: [{ code: '99', label: '优先项', script: 'init', runner: 'platform' }] }],
@@ -52,6 +87,7 @@ test('配置了私人仓库时优先读 sync/menu.json，否则回退 scripts/me
   const fromSync = loadMenuSpec('win32');
   assert.equal(fromSync.groups[0].title, '同步目录菜单');
   assert.equal(fromSync.groups[0].items[0].code, '99');
+  assert.equal(fromSync.sourceLabel, 'dsh-au/sync/menu.json');
 });
 
 test('声明式 params 按平台拼装命令行，并过滤 options.platform', (t) => {
@@ -62,6 +98,8 @@ test('声明式 params 按平台拼装命令行，并过滤 options.platform', (
   const item21 = spec.groups.flatMap((g) => g.items).find((item) => item.code === '21');
   const item71 = spec.groups.flatMap((g) => g.items).find((item) => item.code === '71');
 
+  assert.equal(spec.sourceLabel, 'dsh-au/sync/menu.json');
+  assert.equal(item11.scriptBaseDir, 'scripts');
   assert.equal(item11.resolvedScript, 'scripts/init.ps1');
   assert.equal(loadMenuSpec('darwin').groups[0].items[0].resolvedScript, 'scripts/init.sh');
 
@@ -77,17 +115,28 @@ test('声明式 params 按平台拼装命令行，并过滤 options.platform', (
   assert.equal(mac71.preview, 'node scripts/dsh-restore.mjs --profile local');
 });
 
-test('脚本路径支持 ~/、绝对路径，以及无斜杠时回退 scripts/', (t) => {
+test('脚本路径支持 ~/、绝对路径，以及 scriptBaseDir 声明式解析（未声明不猜 scripts/）', (t) => {
   const { root } = useTempSyncRepo(t, 'dsh-au-menu-script-path-');
   writeFileSync(path.join(root, 'root-tool.mjs'), '// fixture\n');
+  writeFileSync(path.join(root, 'scripts', 'dsh-restore.mjs'), '// fixture\n');
   const homeFile = path.join(root, 'home-tool.py');
   writeFileSync(homeFile, '# fixture\n');
 
   const fromRoot = resolveMenuScriptPath({ runner: 'node', script: 'root-tool.mjs' });
   assert.equal(fromRoot, path.join(root, 'root-tool.mjs'));
 
-  const fromScripts = resolveMenuScriptPath({ runner: 'node', script: 'dsh-restore.mjs' });
-  assert.equal(fromScripts, path.join(root, 'scripts', 'dsh-restore.mjs'));
+  const withoutBaseDir = resolveMenuScriptPath({ runner: 'node', script: 'dsh-restore.mjs' });
+  assert.equal(withoutBaseDir, path.join(root, 'dsh-restore.mjs'));
+
+  const withOptionBaseDir = resolveMenuScriptPath(
+    { runner: 'node', script: 'dsh-restore.mjs' },
+    'win32',
+    { scriptBaseDir: ' /scripts/ ' },
+  );
+  assert.equal(withOptionBaseDir, path.join(root, 'scripts', 'dsh-restore.mjs'));
+
+  const withItemBaseDir = resolveMenuScriptPath({ runner: 'node', script: 'dsh-restore.mjs', scriptBaseDir: 'scripts' });
+  assert.equal(withItemBaseDir, path.join(root, 'scripts', 'dsh-restore.mjs'));
 
   const absolute = resolveMenuScriptPath({ runner: 'python', script: homeFile });
   assert.equal(absolute, homeFile);

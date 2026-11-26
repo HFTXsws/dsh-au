@@ -12,6 +12,7 @@ import {
   applySelectedOfficialPatchBlocks,
   areSelectedSyncItemsInSync,
   backupUncheckedSettingsToMachine,
+  buildCloudPluginSyncItems,
   buildOfficialSyncItems,
   buildOfficialSyncItemsByProfile,
   buildPreferenceSyncItems,
@@ -25,6 +26,7 @@ import {
   normalizeLocalPatchPaths,
   getAllCloudPluginIds,
   pushLocalOfficialSettingsToRepo,
+  readCloudClaudeLauncherSettings,
   readLocalClaudeLauncherSettings,
   resolveDshProfilesManifestPath,
   resolveRepoProfilePatchPath,
@@ -43,6 +45,11 @@ import {
 import { writePluginBundle } from '../lib/plugin-bundles.js';
 import { loadMachinePreferences, loadMachineSettingsBackup, saveMachinePreferences } from '../lib/local-bindings.js';
 import { readModelShortcuts } from '../lib/model-shortcuts.js';
+import {
+  buildAutoPushToastSummary,
+  hasAutoPushRepoChanges,
+  resolveSaveCloudSyncState,
+} from '../lib/index.js';
 import { copyRestoreMock, makeTempSyncRepo, useTempSyncRepo } from './helpers/temp-sync-repo.mjs';
 
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -317,8 +324,8 @@ test('设置页包含云端配置自动同步开关、极简单页同步弹窗�
   assert.match(client, /h\(FullAccessFeatureGroup\),\s*h\(GoalCreationFeatureGroup\),\s*h\(AutoContinueFeatureGroup\)/);
   assert.match(client, /h\(ShortcutSettingsSection\),\s*h\(ModelShortcutSettingsSection\)/);
   assert.match(client, /id: 'sync'[\s\S]*h\(CloudSyncFeatureGroup\)/);
-  // 原 general-settings 拆成 4 个、llm-providers 拆成 5 个，共 12 个固定同步项。
-  assert.equal(OFFICIAL_SYNC_ITEMS.length, 12);
+  // 原 general-settings 拆成 4 个、llm-providers 拆成 4 个（不含默认模型），共 11 个固定同步项。
+  assert.equal(OFFICIAL_SYNC_ITEMS.length, 11);
   assert.ok(OFFICIAL_SYNC_ITEMS.every((item) => Array.isArray(item.comparisons) && item.comparisons.length > 0));
 });
 
@@ -737,7 +744,7 @@ test('buildOfficialSyncItems：能准确识别官方设置与桌面偏好的本�
   assert.equal(spaced['llm-pi-ai'].inSync, true);
   writeFileSync(path.join(profileDir, 'cordis.patch.yml'), localPatchMatch);
 
-  // 2. 本地改了默认模型与桌面偏好：应检出 agent-default-model 与 desktop-preferences 不一致
+  // 2. 本地改了默认模型与桌面偏好：默认模型不纳入云同步，仅检出 desktop-preferences 不一致
   writeFileSync(path.join(profileDir, 'cordis.patch.yml'), localPatchMatch.replace('provider: acp-cursor', 'provider: kiro'));
   writeFileSync(path.join(dshHome, 'desktop-preferences.json'), JSON.stringify({ closeToTray: false, lanAccess: 'lan' }));
 
@@ -745,8 +752,7 @@ test('buildOfficialSyncItems：能准确识别官方设置与桌面偏好的本�
   const kiroItems = Object.fromEntries(byProfile.kiro.map((i) => [i.id, i]));
   assert.equal(kiroItems['ui-theme'].inSync, true);
   assert.equal(kiroItems['llm-pi-ai'].inSync, true);
-  assert.equal(kiroItems['agent-default-model'].inSync, false);
-  assert.deepEqual(kiroItems['agent-default-model'].diffDetails, ['agent-default-model']);
+  assert.equal(kiroItems['agent-default-model'], undefined);
   assert.equal(kiroItems['desktop-preferences'].inSync, false);
   assert.deepEqual(kiroItems['desktop-preferences'].diffDetails, ['closeToTray']);
 });
@@ -1406,7 +1412,7 @@ test('lib/index.js：监听 model-shortcuts.json 与 package.json、默认单机
   assert.match(indexSrc, /name === 'package\.json'/);
   assert.match(indexSrc, /name === 'model-shortcuts\.json'/);
   assert.doesNotMatch(indexSrc, /name === 'dsh-au\.config\.json'/);
-  assert.match(indexSrc, /saveModelShortcuts\(patch\);[\s\S]*?saveMachinePreferences\(\{\s*modelShortcuts:\s*result\.modelShortcuts\s*\}\);[\s\S]*?scheduleRealtimeOfficialPush\(\)/);
+  assert.match(indexSrc, /saveModelShortcuts\(patch\);[\s\S]*?saveMachinePreferences\(\{\s*modelShortcuts:\s*result\.modelShortcuts\s*\}\);[\s\S]*?scheduleRealtimeOfficialPush\('modelShortcuts'\)/);
   assert.match(indexSrc, /shortcutOverrides[\s\S]*?saveMachinePreferences\(\{\s*shortcutOverrides:[\s\S]*?scheduleRealtimeOfficialPush\(\)/);
 });
 
@@ -1600,7 +1606,7 @@ test('acpFallback 与 restoreScript / desktopPreferencesFile：严格按清单�
   });
   const items = Object.fromEntries(buildOfficialSyncItems({ repoRoot, dshHome, profile: 'no-fallback' }).map((i) => [i.id, i]));
   assert.equal(items['llm-pi-ai'].inSync, true);
-  assert.equal(items['agent-default-model'].inSync, true);
+  assert.equal(items['agent-default-model'], undefined);
   assert.equal(items['dsh-acp-adapter'].inSync, true);
 
   // syncOfficialDesktopPreferences 与 runRestoreScriptForCloudSync 均按清单路径读取。
@@ -1982,7 +1988,11 @@ test('backupUncheckedSettingsToMachine：未勾选官方设置与云插件默认
 
   writeFileSync(path.join(repoRoot, 'app-config', 'dsh', 'cordis.patch.kiro.yml'), '- id: ui-theme\n');
   writeTestProfilesManifest(repoRoot, {
-    watchedFiles: ['app-config/codex/gateway-models.json'],
+    codexCatalog: {
+      cloudFile: 'custom/codex-catalog.json',
+      localFile: 'codex/catalog.json',
+    },
+    watchedFiles: ['custom/codex-catalog.json'],
     profiles: [{ id: 'kiro', label: 'Kiro', file: 'app-config/dsh/cordis.patch.kiro.yml', selectable: true }],
   });
 
@@ -2008,7 +2018,7 @@ test('backupUncheckedSettingsToMachine：未勾选官方设置与云插件默认
     },
   }));
   writeFileSync(path.join(dshHome, 'desktop-preferences.json'), JSON.stringify({ closeToTray: true }));
-  writeFileSync(path.join(dshHome, 'codex', 'gateway-models.json'), JSON.stringify({ models: ['gpt-5'] }));
+  writeFileSync(path.join(dshHome, 'codex', 'catalog.json'), JSON.stringify({ models: ['gpt-5'] }));
   writeFileSync(path.join(profileDir, 'cordis.patch.yml'), [
     '- id: ui-theme',
     '  config:',
@@ -2072,7 +2082,7 @@ test('backupUncheckedSettingsToMachine：未勾选官方设置与云插件默认
   if (backupView.officialSettingsBackup || backupView.pluginConfigs) {
     assert.ok(backupView.officialSettingsBackup['desktop-preferences']?.desktopPreferences);
     assert.ok(backupView.officialSettingsBackup['llm-pi-ai']?.cordisBlocks?.['llm-pi-ai']);
-    assert.ok(backupView.officialSettingsBackup['codex-catalog']?.watchedFiles?.['codex/gateway-models.json']);
+    assert.ok(backupView.officialSettingsBackup['codex-catalog']?.watchedFiles?.['codex/catalog.json']);
     assert.match(backupView.pluginConfigs['safe-plugin'], /localhost:3000/);
   } else {
     assert.ok(rawMachine);
@@ -2299,36 +2309,52 @@ test('pushLocalOfficialSettingsToRepo：语义等价时跳过覆写，保留仓�
   assert.equal(readFileSync(repoDesktopPath, 'utf8'), repoDesktopOriginal);
 });
 
-test('修复 3 项假冲突：缩进注释忽略、~/.codex/gateway-models.json 查找、launcher-state.json claude.target 嵌套读取', (t) => {
-  const tempRoot = mkdtempSync(path.join(tmpdir(), 'dsh-fix-3-bugs-'));
+test('声明式 codexCatalog 与 claudeLauncher：按清单读取、支持 codex-catalog 推云，未声明绝不猜私人路径', (t) => {
+  const tempRoot = mkdtempSync(path.join(tmpdir(), 'dsh-declarative-codex-claude-'));
   const prevHome = process.env.USERPROFILE;
   const prevUnixHome = process.env.HOME;
+  const prevClaudeSettings = process.env.DSH_AU_CLAUDE_SETTINGS_PATH;
+  const prevLauncherState = process.env.DSH_AU_LAUNCHER_STATE_PATH;
   t.after(() => {
     if (prevHome === undefined) delete process.env.USERPROFILE;
     else process.env.USERPROFILE = prevHome;
     if (prevUnixHome === undefined) delete process.env.HOME;
     else process.env.HOME = prevUnixHome;
+    if (prevClaudeSettings === undefined) delete process.env.DSH_AU_CLAUDE_SETTINGS_PATH;
+    else process.env.DSH_AU_CLAUDE_SETTINGS_PATH = prevClaudeSettings;
+    if (prevLauncherState === undefined) delete process.env.DSH_AU_LAUNCHER_STATE_PATH;
+    else process.env.DSH_AU_LAUNCHER_STATE_PATH = prevLauncherState;
     rmSync(tempRoot, { recursive: true, force: true });
   });
+
+  delete process.env.DSH_AU_CLAUDE_SETTINGS_PATH;
+  delete process.env.DSH_AU_LAUNCHER_STATE_PATH;
 
   const fakeHome = path.join(tempRoot, 'home');
   const dshHome = path.join(fakeHome, '.dsh');
   const dotCodexDir = path.join(fakeHome, '.codex');
   const claudeDir = path.join(fakeHome, '.claude');
-  const launcherDir = path.join(fakeHome, '.ai-sync-config');
+  const customStateDir = path.join(fakeHome, '.custom-launcher');
+  const privateDir = path.join(fakeHome, '.ai-sync-config');
   const profileDir = path.join(dshHome, 'profiles', 'desktop');
   const repoRoot = path.join(tempRoot, 'repo');
 
   mkdirSync(profileDir, { recursive: true });
   mkdirSync(dotCodexDir, { recursive: true });
   mkdirSync(claudeDir, { recursive: true });
-  mkdirSync(launcherDir, { recursive: true });
-  mkdirSync(path.join(repoRoot, 'app-config', 'dsh'), { recursive: true });
+  mkdirSync(customStateDir, { recursive: true });
+  mkdirSync(privateDir, { recursive: true });
+  mkdirSync(path.join(repoRoot, 'custom', 'dsh'), { recursive: true });
+  mkdirSync(path.join(repoRoot, 'custom', 'codex'), { recursive: true });
+  mkdirSync(path.join(repoRoot, 'custom', 'claude'), { recursive: true });
   mkdirSync(path.join(repoRoot, 'app-config', 'codex'), { recursive: true });
-  writeTestProfilesManifest(repoRoot);
+  mkdirSync(path.join(repoRoot, 'app-config', 'claude'), { recursive: true });
+
+  process.env.USERPROFILE = fakeHome;
+  process.env.HOME = fakeHome;
 
   // 1. 仓库含缩进注释，本机不含注释 -> 模型提供商应判 inSync: true
-  writeFileSync(path.join(repoRoot, 'app-config', 'dsh', 'cordis.patch.general.yml'), [
+  writeFileSync(path.join(repoRoot, 'custom', 'dsh', 'patch.yml'), [
     '- id: llm-pi-ai',
     '  config:',
     '    providers:',
@@ -2346,32 +2372,394 @@ test('修复 3 项假冲突：缩进注释忽略、~/.codex/gateway-models.json 
     '',
   ].join('\n'));
 
-  // 2. Codex 模型目录位于 ~/.codex/gateway-models.json（~/.dsh/codex 下无文件）
-  const codexModels = JSON.stringify({ models: [{ id: 'gpt-5' }, { id: 'gpt-6' }] });
-  writeFileSync(path.join(repoRoot, 'app-config', 'codex', 'gateway-models.json'), codexModels);
-  writeFileSync(path.join(dotCodexDir, 'gateway-models.json'), codexModels);
-
-  // 3. launcher-state.json 使用嵌套结构 { claude: { target: 'antigravity' } }
-  process.env.USERPROFILE = fakeHome;
-  process.env.HOME = fakeHome;
+  // 2. 故意放置旧硬编码路径文件，验证清单未声明时绝不会偷偷读取
+  writeFileSync(path.join(repoRoot, 'app-config', 'codex', 'gateway-models.json'), JSON.stringify({ models: [{ id: 'leaked-1' }, { id: 'leaked-2' }] }));
+  writeFileSync(path.join(dotCodexDir, 'gateway-models.json'), JSON.stringify({ models: [{ id: 'stale-old' }] }));
+  writeFileSync(path.join(repoRoot, 'app-config', 'claude', 'kiro-gateway.json'), JSON.stringify({ defaultModel: 'leaked-kiro-model' }));
+  writeFileSync(path.join(privateDir, 'launcher-state.json'), JSON.stringify({ claude: { target: 'leaked-private-gw' } }));
   writeFileSync(path.join(claudeDir, 'settings.json'), JSON.stringify({ env: { ANTHROPIC_MODEL: 'm1' } }));
-  writeFileSync(path.join(launcherDir, 'launcher-state.json'), JSON.stringify({ claude: { target: 'antigravity' } }));
 
-  const items = buildOfficialSyncItems({
+  writeTestProfilesManifest(repoRoot, {
+    defaultProfile: 'general',
+    profiles: [{ id: 'general', label: 'General', file: 'custom/dsh/patch.yml', selectable: true }],
+  });
+
+  const undeclaredItems = buildOfficialSyncItems({ repoRoot, dshHome, profile: 'general' });
+  const undeclaredCodex = undeclaredItems.find((i) => i.id === 'codex-catalog');
+  assert.equal(undeclaredCodex?.inSync, true);
+  assert.equal(undeclaredCodex?.diffLabel, '未在方案清单声明');
+
+  const undeclaredLocalLauncher = readLocalClaudeLauncherSettings({ dshHome, repoRoot });
+  assert.equal(undeclaredLocalLauncher.gateway, undefined);
+  assert.equal(undeclaredLocalLauncher.ANTHROPIC_MODEL, 'm1');
+
+  const undeclaredCloudLauncher = readCloudClaudeLauncherSettings({ repoRoot });
+  assert.equal(undeclaredCloudLauncher.exists, false);
+
+  // 3. 在清单中显式声明 codexCatalog 与 claudeLauncher 后，完全按声明路径比对、读取与推送
+  const codexModelsV1 = JSON.stringify({ models: [{ id: 'gpt-5' }, { id: 'gpt-6' }] }, null, 2);
+  writeFileSync(path.join(repoRoot, 'custom', 'codex', 'models-cloud.json'), codexModelsV1);
+  writeFileSync(path.join(dotCodexDir, 'models-full.json'), codexModelsV1);
+  writeFileSync(path.join(customStateDir, 'state.json'), JSON.stringify({ claude: { target: 'custom-gw' } }));
+  writeFileSync(path.join(repoRoot, 'custom', 'claude', 'fallback-gw.json'), JSON.stringify({ defaultModel: 'm1' }));
+
+  writeTestProfilesManifest(repoRoot, {
+    defaultProfile: 'general',
+    codexCatalog: {
+      cloudFile: 'custom/codex/models-cloud.json',
+      localFile: '~/.codex/models-full.json',
+    },
+    claudeLauncher: {
+      fallbackGatewayFile: 'custom/claude/fallback-gw.json',
+    },
+    profiles: [{ id: 'general', label: 'General', file: 'custom/dsh/patch.yml', selectable: true }],
+  });
+
+  const declaredItems = buildOfficialSyncItems({ repoRoot, dshHome, profile: 'general' });
+  assert.equal(declaredItems.find((i) => i.id === 'llm-pi-ai')?.inSync, true);
+  assert.equal(declaredItems.find((i) => i.id === 'codex-catalog')?.inSync, true);
+  assert.equal(declaredItems.find((i) => i.id === 'claude-launcher')?.inSync, true);
+
+  // Claude 启动器只关心模型档位与思考强度，不读取也不同步 gateway 字段
+  const declaredLocalLauncher = readLocalClaudeLauncherSettings({ dshHome, repoRoot });
+  assert.equal(declaredLocalLauncher.gateway, undefined);
+  assert.equal(declaredLocalLauncher.ANTHROPIC_MODEL, 'm1');
+
+  // 4. 修改本机声明的 Codex 目录文件，验证能检出不一致且 pushLocalOfficialSettingsToRepo 能回写云端
+  const codexModelsV2 = JSON.stringify({ models: [{ id: 'gpt-5' }, { id: 'gpt-6' }, { id: 'gpt-7' }] }, null, 2);
+  writeFileSync(path.join(dotCodexDir, 'models-full.json'), codexModelsV2);
+  const diffItems = buildOfficialSyncItems({ repoRoot, dshHome, profile: 'general' });
+  assert.equal(diffItems.find((i) => i.id === 'codex-catalog')?.inSync, false);
+
+  const pushed = pushLocalOfficialSettingsToRepo({
     repoRoot,
     dshHome,
     profile: 'general',
-    selectedItems: ['llm-pi-ai', 'codex-catalog', 'claude-launcher'],
+    selectedItems: ['codex-catalog'],
+    selectedPlugins: [],
+    syncDshAuPreferences: false,
   });
-  const llmItem = items.find((i) => i.id === 'llm-pi-ai');
-  const codexItem = items.find((i) => i.id === 'codex-catalog');
-  assert.equal(llmItem?.inSync, true);
-  assert.equal(codexItem?.inSync, true);
-
-  const localLauncher = readLocalClaudeLauncherSettings({ dshHome });
-  assert.equal(localLauncher.gateway, 'antigravity');
-  assert.equal(localLauncher.ANTHROPIC_MODEL, 'm1');
+  assert.equal(pushed.codexCatalogUpdated, true);
+  const afterPushItems = buildOfficialSyncItems({ repoRoot, dshHome, profile: 'general' });
+  assert.equal(afterPushItems.find((i) => i.id === 'codex-catalog')?.inSync, true);
 });
+
+test('runRestoreScriptForCloudSync：区分未声明 restoreScript 与脚本不存在，绝不误报未配置私人同步仓库', (t) => {
+  const tempRoot = mkdtempSync(path.join(tmpdir(), 'dsh-restore-script-err-'));
+  const prevSyncRepo = process.env.DSH_AU_SYNC_REPO;
+  t.after(() => {
+    if (prevSyncRepo === undefined) delete process.env.DSH_AU_SYNC_REPO;
+    else process.env.DSH_AU_SYNC_REPO = prevSyncRepo;
+    rmSync(tempRoot, { recursive: true, force: true });
+  });
+
+  const repoRoot = path.join(tempRoot, 'repo');
+  const dshHome = path.join(tempRoot, 'dshHome');
+  mkdirSync(path.join(repoRoot, 'custom'), { recursive: true });
+  mkdirSync(dshHome, { recursive: true });
+  writeFileSync(path.join(repoRoot, 'custom', 'patch.yml'), '- id: ui-theme\n');
+  process.env.DSH_AU_SYNC_REPO = repoRoot;
+
+  // 1. 清单未声明 restoreScript -> 返回 ok: false 且明确提示未声明 restoreScript
+  writeTestProfilesManifest(repoRoot, {
+    defaultProfile: 'general',
+    restoreScript: '',
+    profiles: [{ id: 'general', label: 'General', file: 'custom/patch.yml', selectable: true }],
+  });
+  const missingDecl = runRestoreScriptForCloudSync({
+    repoRoot,
+    dshHome,
+    profile: 'general',
+    selectedItems: ['ui-theme'],
+    selectedPlugins: [],
+    preferences: [],
+  });
+  assert.equal(missingDecl.ok, false);
+  assert.match(missingDecl.error, /未声明 restoreScript/);
+  assert.doesNotMatch(missingDecl.error, /未配置私人同步仓库/);
+
+  // 2. 清单声明了不存在的脚本 -> 返回 ok: false 且明确指出脚本不存在
+  writeTestProfilesManifest(repoRoot, {
+    defaultProfile: 'general',
+    restoreScript: 'custom/not-found.mjs',
+    profiles: [{ id: 'general', label: 'General', file: 'custom/patch.yml', selectable: true }],
+  });
+  const missingFile = runRestoreScriptForCloudSync({
+    repoRoot,
+    dshHome,
+    profile: 'general',
+    selectedItems: ['ui-theme'],
+    selectedPlugins: [],
+    preferences: [],
+  });
+  assert.equal(missingFile.ok, false);
+  assert.match(missingFile.error, /还原脚本不存在.*custom\/not-found\.mjs/);
+  assert.doesNotMatch(missingFile.error, /未配置私人同步仓库/);
+});
+
+test('默认模型不同步、Claude启动器不比对gateway、dsh-au不比对版本号', (t) => {
+  const tempRoot = mkdtempSync(path.join(tmpdir(), 'dsh-trim-3-conflicts-'));
+  const prevSyncRepo = process.env.DSH_AU_SYNC_REPO;
+  const prevCloudManifest = process.env.DSH_AU_CLOUD_MANIFEST_PATH;
+  t.after(() => {
+    if (prevSyncRepo === undefined) delete process.env.DSH_AU_SYNC_REPO;
+    else process.env.DSH_AU_SYNC_REPO = prevSyncRepo;
+    if (prevCloudManifest === undefined) delete process.env.DSH_AU_CLOUD_MANIFEST_PATH;
+    else process.env.DSH_AU_CLOUD_MANIFEST_PATH = prevCloudManifest;
+    rmSync(tempRoot, { recursive: true, force: true });
+  });
+
+  const repoRoot = path.join(tempRoot, 'repo');
+  const fakeHome = path.join(tempRoot, 'home');
+  const dshHome = path.join(fakeHome, '.dsh');
+  const profileDir = path.join(dshHome, 'profiles', 'desktop');
+  const claudeDir = path.join(fakeHome, '.claude');
+  const dshAuPkgDir = path.join(profileDir, 'node_modules', 'dsh-au');
+  mkdirSync(path.join(repoRoot, 'dsh-sync', 'cloud'), { recursive: true });
+  mkdirSync(path.join(repoRoot, 'dsh-sync', 'plugins', 'dsh-au'), { recursive: true });
+  mkdirSync(path.join(repoRoot, 'custom'), { recursive: true });
+  mkdirSync(dshAuPkgDir, { recursive: true });
+  mkdirSync(claudeDir, { recursive: true });
+
+  process.env.DSH_AU_SYNC_REPO = repoRoot;
+  const cloudManifestPath = path.join(repoRoot, 'dsh-sync', 'cloud', 'manifest.cloud.json');
+  process.env.DSH_AU_CLOUD_MANIFEST_PATH = cloudManifestPath;
+
+  writeTestProfilesManifest(repoRoot, {
+    defaultProfile: 'general',
+    profiles: [{ id: 'general', label: 'General', file: 'custom/patch.yml', selectable: true }],
+  });
+  writeFileSync(cloudManifestPath, JSON.stringify({
+    schemaVersion: 1,
+    plugins: {
+      'dsh-au': { id: 'dsh-au', package: 'dsh-au', name: 'dsh-au', version: '0.2.2-rc.3-4', source: 'npm' },
+    },
+  }));
+  writeFileSync(path.join(repoRoot, 'dsh-sync', 'plugins', 'dsh-au', 'plugin.json'), JSON.stringify({
+    schemaVersion: 1,
+    package: 'dsh-au',
+    name: 'dsh-au',
+    version: '0.2.2-rc.3-4',
+    enabled: true,
+    hasConfig: false,
+  }));
+  writeFileSync(path.join(dshAuPkgDir, 'package.json'), JSON.stringify({ name: 'dsh-au', version: '0.2.2-rc.9-9' }));
+  writeFileSync(path.join(profileDir, 'package.json'), JSON.stringify({
+    dependencies: { 'dsh-au': '0.2.2-rc.9-9' },
+    dsh: { profile: { bundles: ['dsh-au'] } },
+  }));
+
+  // 1. 默认模型本地与云不同，既不出现在同步项也不被动态发现，且改云端默认模型不影响云端哈希
+  const patchA = [
+    '- id: agent-default-model',
+    '  name: "@deepseek-ai/agent-default-model"',
+    '  config:',
+    '    provider: demo-a',
+    '    model: model-a',
+    '',
+  ].join('\n');
+  const patchB = patchA.replace('model-a', 'model-b');
+  writeFileSync(path.join(repoRoot, 'custom', 'patch.yml'), patchA);
+  writeFileSync(path.join(profileDir, 'cordis.patch.yml'), patchB);
+  const hash1 = computeOfficialSettingsHash(repoRoot, 'general');
+  writeFileSync(path.join(repoRoot, 'custom', 'patch.yml'), patchB);
+  const hash2 = computeOfficialSettingsHash(repoRoot, 'general');
+  assert.equal(hash1, hash2);
+
+  // 2. Claude 启动器云端带旧 gateway、本机不带 gateway（或反之）均判一致
+  writeFileSync(path.join(claudeDir, 'settings.json'), JSON.stringify({
+    env: { ANTHROPIC_MODEL: 'm-opus' },
+    effort: 'medium',
+  }));
+  writeFileSync(path.join(repoRoot, 'dsh-sync', 'cloud', 'claude-launcher.json'), JSON.stringify({
+    schemaVersion: 1,
+    ANTHROPIC_MODEL: 'm-opus',
+    effort: 'medium',
+    gateway: 'legacy-gw',
+  }));
+  const officialItems = buildOfficialSyncItems({ repoRoot, dshHome, profile: 'general' });
+  assert.equal(officialItems.some((i) => i.id === 'agent-default-model' || i.id === 'patch:agent-default-model'), false);
+  const claudeItem = officialItems.find((i) => i.id === 'claude-launcher');
+  assert.equal(claudeItem?.inSync, true);
+  assert.equal(claudeItem?.fields?.some((f) => f.key === 'claude-launcher.gateway'), false);
+
+  // 3. dsh-au 版本本地与云不同：inSync 为 true、不进 findOutdatedCloudPlugins、改云端版本号不影响云端哈希
+  const pluginItems = buildCloudPluginSyncItems({ repoRoot, dshHome });
+  const dshAuItem = pluginItems.find((p) => p.id === 'dsh-au');
+  assert.equal(dshAuItem?.inSync, true);
+  assert.equal(dshAuItem?.diffLines?.some((l) => l.key === 'version'), false);
+  const outdated = findOutdatedCloudPlugins({ repoRoot, dshHome, profile: 'general', selectedPlugins: ['dsh-au'] });
+  assert.deepEqual(outdated, []);
+  const hashBeforeVer = computeOfficialSettingsHash(repoRoot, 'general');
+  writeFileSync(path.join(repoRoot, 'dsh-sync', 'plugins', 'dsh-au', 'plugin.json'), JSON.stringify({
+    schemaVersion: 1,
+    package: 'dsh-au',
+    name: 'dsh-au',
+    version: '0.2.2-rc.99-0',
+    enabled: true,
+    hasConfig: false,
+  }));
+  const hashAfterVer = computeOfficialSettingsHash(repoRoot, 'general');
+  assert.equal(hashBeforeVer, hashAfterVer);
+});
+
+test('lib/index.js：cloudSyncToast 状态透出、自动推送摘要/冲突 Toast 触发及 saveCloudSyncSettings 防反杀逻辑', () => {
+  const indexSrc = readFileSync(new URL('../lib/index.js', import.meta.url), 'utf8');
+
+  // 1. 全局 cloudSyncToast 写入与状态快照 / getCloudSyncSettings 透出
+  assert.match(indexSrc, /const setCloudSyncToast = \(toast\) =>/);
+  assert.match(indexSrc, /globalThis\.__dshAuCloudSyncToast\s*=/);
+  assert.match(indexSrc, /startupCloudSyncNotice:\s*globalThis\.__dshAuStartupCloudSyncNotice \|\| null,\s*\n\s*\/\/[^\n]*\n\s*cloudSyncToast:\s*globalThis\.__dshAuCloudSyncToast \|\| null,/);
+  assert.match(indexSrc, /getCloudSyncSettings[\s\S]*?cloudSyncToast:\s*globalThis\.__dshAuCloudSyncToast \|\| null,/);
+
+  // 2. pendingPushReasons 收集与 watcher/接口来源标记
+  assert.match(indexSrc, /const pendingPushReasons = new Set\(\);/);
+  assert.match(indexSrc, /scheduleRealtimeOfficialPush = \(reason = ''\) => \{[\s\S]*?if \(reason\) pendingPushReasons\.add\(reason\);/);
+  assert.match(indexSrc, /const reasons = Array\.from\(pendingPushReasons\);\s*\n\s*pendingPushReasons\.clear\(\);/);
+  assert.match(indexSrc, /name === 'cordis\.patch\.yml' \|\| name === 'package\.json'[\s\S]*?scheduleRealtimeOfficialPush\(name === 'cordis\.patch\.yml' \|\| name === 'package\.json' \? 'official' : ''\)/);
+  assert.match(indexSrc, /name === 'model-shortcuts\.json'[\s\S]*?'modelShortcuts'[\s\S]*?'desktop-preferences'[\s\S]*?scheduleRealtimeOfficialPush\(reason\)/);
+
+  // 3. 冲突拦截与自动推送成功 Toast
+  assert.match(indexSrc, /status:\s*'warn',\s*\n\s*title:\s*'自动同步已暂停'/);
+  assert.match(indexSrc, /hasAutoPushRepoChanges\(\{ pushed, lastSyncedHash: syncCfg\.lastSyncedHash \}\)/);
+  assert.match(indexSrc, /status:\s*'ok',\s*\n\s*title:\s*'已自动同步到云端'/);
+
+  // 4. saveCloudSyncSettings 新增勾选防反杀校验
+  assert.match(indexSrc, /if \(action === 'saveCloudSyncSettings'\)[\s\S]*?hasSyncSelectionChanged\(prev, next\)[\s\S]*?areSelectedSyncItemsInSync\([\s\S]*?computeLocalOfficialSettingsHash\([\s\S]*?resolveSaveCloudSyncState\(/);
+});
+
+test('buildAutoPushToastSummary 与 hasAutoPushRepoChanges：精准拼装摘要并拦截空转 Toast', () => {
+  assert.deepEqual(
+    buildAutoPushToastSummary({
+      pushed: {
+        updatedPatchIds: ['ui-theme'],
+        desktopUpdated: true,
+        updatedPlugins: ['demo-plugin'],
+        dshAuPrefsUpdated: true,
+        machinePreferencesUpdated: true,
+      },
+      reasons: ['modelShortcuts', 'desktop-preferences', 'official'],
+    }),
+    ['快捷模型配置', '桌面设置', '官方配置', '云插件配置', 'dsh-au 基础开关'],
+  );
+
+  // 空结果回退为 '本机配置'
+  assert.deepEqual(buildAutoPushToastSummary({ pushed: {}, reasons: [] }), ['本机配置']);
+
+  // 未勾选 modelShortcuts 时，即使 reason 带了 modelShortcuts 也不误报
+  assert.deepEqual(
+    buildAutoPushToastSummary({
+      pushed: { updatedPatchIds: ['ui-theme'] },
+      reasons: ['modelShortcuts'],
+      selectedPreferences: [],
+    }),
+    ['官方配置'],
+  );
+
+  // 仅空转（无实质写入且哈希未变）不弹 Toast
+  assert.equal(
+    hasAutoPushRepoChanges({
+      pushed: {
+        updatedPatchIds: [],
+        desktopUpdated: false,
+        claudeLauncherUpdated: false,
+        codexCatalogUpdated: false,
+        updatedPlugins: ['dsh-au'],
+        dshAuPrefsUpdated: true,
+        hash: 'same-hash',
+      },
+      lastSyncedHash: 'same-hash',
+    }),
+    false,
+  );
+
+  // 哈希发生变化或存在真实文件写入时允许弹 Toast
+  assert.equal(
+    hasAutoPushRepoChanges({
+      pushed: { updatedPatchIds: [], hash: 'new-hash' },
+      lastSyncedHash: 'old-hash',
+    }),
+    true,
+  );
+  assert.equal(
+    hasAutoPushRepoChanges({
+      pushed: { codexCatalogUpdated: true, hash: 'same-hash' },
+      lastSyncedHash: 'same-hash',
+    }),
+    true,
+  );
+});
+
+test('resolveSaveCloudSyncState：勾选一致项立即刷新双基线，新增不一致项置 conflict 防旧云端反杀，首次开启保留引导', () => {
+  const basePrev = {
+    enabled: true,
+    profile: 'general',
+    selectedItems: ['ui-theme'],
+    selectedPreferences: [],
+    selectedPlugins: ['dsh-au'],
+    syncPluginConfigs: ['dsh-au'],
+    lastSyncedHash: 'old-sync-hash',
+    lastLocalHash: 'old-local-hash',
+    conflict: false,
+    conflictReason: '',
+  };
+
+  // 1. 新勾选 modelShortcuts 且本机与云端一致：立即刷新双端哈希基线并清冲突
+  const inSyncResult = resolveSaveCloudSyncState({
+    prev: { ...basePrev, conflict: true, conflictReason: 'old' },
+    next: { ...basePrev, selectedPreferences: ['modelShortcuts'], conflict: true, conflictReason: 'old' },
+    hasSyncRepoReady: true,
+    allInSync: true,
+    currentHash: 'new-sync-hash',
+    currentLocalHash: 'new-local-hash',
+  });
+  assert.equal(inSyncResult.lastSyncedHash, 'new-sync-hash');
+  assert.equal(inSyncResult.lastLocalHash, 'new-local-hash');
+  assert.equal(inSyncResult.conflict, false);
+  assert.equal(inSyncResult.conflictReason, '');
+
+  // 2. 新勾选 modelShortcuts 且本机与云端不一致：置 conflict: true 阻止自动覆盖
+  const conflictResult = resolveSaveCloudSyncState({
+    prev: basePrev,
+    next: { ...basePrev, selectedPreferences: ['modelShortcuts'] },
+    hasSyncRepoReady: true,
+    allInSync: false,
+    currentHash: 'new-sync-hash',
+    currentLocalHash: 'new-local-hash',
+  });
+  assert.equal(conflictResult.conflict, true);
+  assert.match(conflictResult.conflictReason, /新勾选的同步项与云端内容不一致/);
+
+  // 3. 仅取消勾选（无新增项）且不一致：不新增标记 conflict
+  const removedOnlyResult = resolveSaveCloudSyncState({
+    prev: { ...basePrev, selectedPreferences: ['modelShortcuts'] },
+    next: { ...basePrev, selectedPreferences: [] },
+    hasSyncRepoReady: true,
+    allInSync: false,
+    currentHash: 'new-sync-hash',
+    currentLocalHash: 'new-local-hash',
+  });
+  assert.equal(removedOnlyResult.conflict, false);
+
+  // 4. 首次将 enabled 从 false 打开且 lastSyncedHash 为空（未新增勾选）：保留 firstSyncPending，不误标 conflict
+  const firstEnablePrev = {
+    ...basePrev,
+    enabled: false,
+    lastSyncedHash: '',
+    lastLocalHash: '',
+  };
+  const firstEnableResult = resolveSaveCloudSyncState({
+    prev: firstEnablePrev,
+    next: { ...firstEnablePrev, enabled: true },
+    hasSyncRepoReady: true,
+    allInSync: false,
+    currentHash: 'cloud-hash',
+    currentLocalHash: 'local-hash',
+  });
+  assert.equal(firstEnableResult.conflict, false);
+  assert.equal(firstEnableResult.lastSyncedHash, '');
+});
+
 
 
 
