@@ -21562,12 +21562,131 @@ window.__ModuleLoader__.load({
     })();
 //#endregion
 //#region src/16-entry.js — apply 与插槽注册
+    /**
+     * 通用预览沙盒中继桥：无论当前是主控制端还是受控端 iframe，都在页面加载首毫秒注册。
+     * 接收侧边栏 sandbox="allow-scripts" 预览 iframe 的 postMessage，经同源 /dsh-au/api 转发，
+     * 服务端严格校验目标私人扩展在 extension.json 中显式声明了 allowPreviewBridge: true。
+     */
+    function installPreviewExtBridge() {
+      if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return () => {};
+      const onMessage = (ev) => {
+        const msg = ev && ev.data;
+        if (!msg || msg.type !== 'dsh-au:preview-ext:req' || !msg.reqId || !msg.extId || !msg.subAction) return;
+        const src = ev.source;
+        if (!src || src === window || typeof src.postMessage !== 'function') return;
+        Promise.resolve()
+          .then(() => callApi('extAction', {
+            extId: String(msg.extId),
+            subAction: String(msg.subAction),
+            payload: msg.payload && typeof msg.payload === 'object' ? msg.payload : {},
+            fromPreviewBridge: true,
+          }))
+          .then((res) => {
+            src.postMessage({
+              type: 'dsh-au:preview-ext:res',
+              reqId: msg.reqId,
+              ok: Boolean(res && res.ok !== false),
+              data: res,
+              error: res && res.ok === false ? (res.error || 'ext-error') : '',
+            }, '*');
+          })
+          .catch((err) => {
+            src.postMessage({
+              type: 'dsh-au:preview-ext:res',
+              reqId: msg.reqId,
+              ok: false,
+              error: err?.message || String(err),
+            }, '*');
+          });
+      };
+      window.addEventListener('message', onMessage);
+      return () => window.removeEventListener('message', onMessage);
+    }
+
+    /**
+     * 移动端 HTML 预览白屏兼容补丁：
+     * DSH 宿主以 <iframe src="blob:..." sandbox="allow-scripts"> 渲染交互式 HTML，
+     * 部分 Android OEM / iOS 手机浏览器在无 allow-same-origin 的 sandbox iframe 中会静默阻止 blob: 导航导致白屏。
+     * 在移动端由父页面毫秒级读取同源 blob 内容并转为 srcdoc（严格保留 sandbox="allow-scripts" 安全边界）。
+     */
+    function unpackDshHtmlBundle(blobText) {
+      const m = typeof blobText === 'string' && blobText.match(/JSON\.parse\(text\("([A-Za-z0-9+/=]+)"\)\)/);
+      if (!m) return blobText;
+      try {
+        const bin = atob(m[1]);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+        const parsed = JSON.parse(new TextDecoder('utf-8').decode(bytes));
+        if (parsed && typeof parsed.html === 'string' && (!Array.isArray(parsed.assets) || parsed.assets.length === 0)) {
+          return parsed.html;
+        }
+      } catch {}
+      return blobText;
+    }
+
+    function installMobileHtmlPreviewFix() {
+      if (typeof window === 'undefined' || typeof document === 'undefined') return () => {};
+      const ua = String(window.navigator?.userAgent || '');
+      const isMobileUa = /Android|iPhone|iPad|iPod|Mobile|HarmonyOS|ColorOS/i.test(ua);
+      if (!isMobileUa) return () => {};
+      const patchIframe = (iframe) => {
+        if (!iframe || iframe.tagName !== 'IFRAME') return;
+        if (!iframe.hasAttribute('data-html-preview')) return;
+        const src = iframe.getAttribute('src') || '';
+        if (!src.startsWith('blob:')) return;
+        if (iframe.dataset.dshAuSrcdocFor === src) return;
+        iframe.dataset.dshAuSrcdocFor = src;
+        fetch(src)
+          .then((r) => (r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`))))
+          .then((blobText) => {
+            if (!iframe.isConnected || iframe.dataset.dshAuSrcdocFor !== src) return;
+            const html = unpackDshHtmlBundle(blobText);
+            iframe.removeAttribute('src');
+            iframe.setAttribute('srcdoc', html);
+          })
+          .catch(() => {
+            delete iframe.dataset.dshAuSrcdocFor;
+          });
+      };
+      const scanAll = (root) => {
+        if (!root || typeof root.querySelectorAll !== 'function') return;
+        if (root.tagName === 'IFRAME') patchIframe(root);
+        root.querySelectorAll('iframe[data-html-preview][src^="blob:"]').forEach(patchIframe);
+      };
+      scanAll(document);
+      if (typeof MutationObserver !== 'function') return () => {};
+      const observer = new MutationObserver((mutations) => {
+        for (const m of mutations) {
+          if (m.type === 'attributes' && m.target) {
+            patchIframe(m.target);
+          } else if (m.addedNodes && m.addedNodes.length) {
+            for (const node of m.addedNodes) {
+              if (node && node.nodeType === 1) scanAll(node);
+            }
+          }
+        }
+      });
+      observer.observe(document.documentElement || document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['src'],
+      });
+      return () => observer.disconnect();
+    }
+
     function apply(ctx) {
       // 无论作为主控制端还是受控端 iframe，均安装剪贴板兼容补丁以修补远程 HTTP 下复制代码块失效的问题。
       ctx.effect(() => {
         installClipboardPolyfill();
         return () => {};
       }, 'dsh-au: clipboard polyfill');
+
+      // 无论作为主控制端还是受控端 iframe，首毫秒安装预览沙盒扩展中继桥。
+      ctx.effect(() => installPreviewExtBridge(), 'dsh-au: preview ext bridge');
+
+      // 移动端将 HTML 预览的 blob: iframe 转为 srcdoc，规避 Android/iOS 浏览器沙盒拦截 blob: 导致的白屏。
+      ctx.effect(() => installMobileHtmlPreviewFix(), 'dsh-au: mobile html preview srcdoc fix');
 
       // 被控制端由外层 DSH-AU 统一提供设备栏；仅保留按键桥以穿透 iframe 的焦点边界。
       if (isControlledFrame()) {
