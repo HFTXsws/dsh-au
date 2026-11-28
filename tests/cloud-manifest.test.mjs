@@ -325,3 +325,108 @@ test('normalizeNpmRegistry 与 upsertCloudPlugin 拒绝含凭据或敏感 query 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('云清单幂等写入：重复同步相同插件/服务/设备不改 updatedAt 且返回 unchanged: true，实际变更时更新落盘', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'dsh-au-cloud-idempotent-'));
+  const manifestPath = path.join(dir, 'manifest.cloud.json');
+  const prev = process.env.DSH_AU_CLOUD_MANIFEST_PATH;
+  process.env.DSH_AU_CLOUD_MANIFEST_PATH = manifestPath;
+  try {
+    const pluginInput = {
+      id: 'demo-plugin',
+      name: 'Demo Plugin',
+      package: 'demo-plugin',
+      source: 'npm',
+      version: '1.0.0',
+      registry: 'https://registry.npmmirror.com/',
+    };
+    const serviceInput = {
+      name: '示例服务',
+      description: '初始描述',
+      scriptPath: inRepoFile,
+      port: 8321,
+      health: 'http://127.0.0.1:8321/health',
+    };
+    const devicesInput = [
+      { id: 'mac-mini', name: 'Mac', routes: [{ id: 'r1', type: 'tunnel', url: 'https://mac.example/' }] },
+    ];
+
+    // 1. 初次写入：返回 unchanged: false 并正常落盘
+    const firstPlugin = upsertCloudPlugin(pluginInput, 'demo-plugin');
+    assert.equal(firstPlugin.unchanged, false);
+    assert.ok(firstPlugin.manifest.updatedAt);
+
+    const firstService = upsertCloudService(serviceInput, 'demo_svc');
+    assert.equal(firstService.unchanged, false);
+
+    const firstDevices = writeCloudDevices(devicesInput);
+    assert.equal(firstDevices.unchanged, false);
+
+    const baselineRaw = readFileSync(manifestPath, 'utf8');
+    const baselineParsed = JSON.parse(baselineRaw);
+
+    // 2. 重复调用相同内容：均返回 unchanged: true，且磁盘内容与 updatedAt 保持完全不变
+    const samePlugin = upsertCloudPlugin(pluginInput, 'demo-plugin');
+    assert.equal(samePlugin.unchanged, true);
+    assert.equal(samePlugin.manifest.updatedAt, baselineParsed.updatedAt);
+    assert.equal(samePlugin.manifest.schemaVersion, 1);
+    assert.equal(readFileSync(manifestPath, 'utf8'), baselineRaw);
+
+    const sameService = upsertCloudService(serviceInput, 'demo_svc');
+    assert.equal(sameService.unchanged, true);
+    assert.equal(sameService.manifest.updatedAt, baselineParsed.updatedAt);
+    assert.equal(readFileSync(manifestPath, 'utf8'), baselineRaw);
+
+    const sameDevices = writeCloudDevices(devicesInput);
+    assert.equal(sameDevices.unchanged, true);
+    assert.equal(sameDevices.manifest.updatedAt, baselineParsed.updatedAt);
+    assert.equal(readFileSync(manifestPath, 'utf8'), baselineRaw);
+
+    // 3. 人工调整磁盘 JSON 键序并固定旧时间戳后再次重复写入，仍应判为一致且保留旧时间戳
+    const fixedOldTime = '2026-01-01T00:00:00.000Z';
+    const reorderedRaw = `${JSON.stringify({
+      plugins: baselineParsed.plugins,
+      devices: baselineParsed.devices,
+      services: baselineParsed.services,
+      updatedAt: fixedOldTime,
+      schemaVersion: 1,
+    }, null, 2)}\n`;
+    writeFileSync(manifestPath, reorderedRaw, 'utf8');
+
+    const reorderedSame = upsertCloudPlugin(pluginInput, 'demo-plugin');
+    assert.equal(reorderedSame.unchanged, true);
+    assert.equal(reorderedSame.manifest.updatedAt, fixedOldTime);
+    assert.equal(readFileSync(manifestPath, 'utf8'), reorderedRaw);
+
+    // 4. 实际修改插件版本：返回 unchanged: false，落盘并更新 updatedAt
+    const updatedPlugin = upsertCloudPlugin({ ...pluginInput, version: '1.1.0' }, 'demo-plugin');
+    assert.equal(updatedPlugin.unchanged, false);
+    assert.notEqual(updatedPlugin.manifest.updatedAt, fixedOldTime);
+    assert.equal(JSON.parse(readFileSync(manifestPath, 'utf8')).plugins['demo-plugin'].version, '1.1.0');
+
+    // 5. 实际修改服务描述：返回 unchanged: false，落盘并更新 updatedAt
+    const beforeServiceEdit = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    writeFileSync(manifestPath, `${JSON.stringify({ ...beforeServiceEdit, updatedAt: fixedOldTime }, null, 2)}\n`, 'utf8');
+    const updatedService = upsertCloudService({ ...serviceInput, description: '新描述' }, 'demo_svc');
+    assert.equal(updatedService.unchanged, false);
+    assert.notEqual(updatedService.manifest.updatedAt, fixedOldTime);
+    assert.equal(JSON.parse(readFileSync(manifestPath, 'utf8')).services.demo_svc.description, '新描述');
+
+    // 6. 实际修改设备路由：返回 unchanged: false，落盘并更新 updatedAt
+    const beforeDeviceEdit = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    writeFileSync(manifestPath, `${JSON.stringify({ ...beforeDeviceEdit, updatedAt: fixedOldTime }, null, 2)}\n`, 'utf8');
+    const updatedDevices = writeCloudDevices([
+      { id: 'mac-mini', name: 'Mac', routes: [{ id: 'r1', type: 'tunnel', url: 'https://mac-v2.example/' }] },
+    ]);
+    assert.equal(updatedDevices.unchanged, false);
+    assert.notEqual(updatedDevices.manifest.updatedAt, fixedOldTime);
+    assert.equal(
+      JSON.parse(readFileSync(manifestPath, 'utf8')).devices[0].routes[0].url,
+      'https://mac-v2.example/',
+    );
+  } finally {
+    if (prev === undefined) delete process.env.DSH_AU_CLOUD_MANIFEST_PATH;
+    else process.env.DSH_AU_CLOUD_MANIFEST_PATH = prev;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

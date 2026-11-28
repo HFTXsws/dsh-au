@@ -1,12 +1,14 @@
 import './isolate-sync.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadConfig, saveConfig } from '../lib/config-store.js';
+import { machineFilePath, saveMachineSettingsBackup, writeActivePointer } from '../lib/local-bindings.js';
 import {
   DEFAULT_WINDOW_STATE,
+  isSameWindowGeometry,
   normalizeWindowGeometry,
   normalizeWindowState,
   resolveRestoreTarget,
@@ -196,4 +198,111 @@ test('配置读写往返保留窗口记忆，脏数据在读取时被清洗', ()
     else process.env.DSH_HOME = previousHome;
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('isSameWindowGeometry 忽略 savedAt 并准确识别空值与实质几何变化', () => {
+  const base = {
+    bounds: { x: 100, y: 80, width: 1200, height: 800 },
+    display: DISPLAY,
+    fullscreen: false,
+    maximized: false,
+    savedAt: '2026-01-01T00:00:00.000Z',
+  };
+
+  // 空值与脏数据归一后均为 null
+  assert.equal(isSameWindowGeometry(null, undefined), true);
+  assert.equal(isSameWindowGeometry(null, { bounds: { width: 0 } }), true);
+  assert.equal(isSameWindowGeometry(null, base), false);
+  assert.equal(isSameWindowGeometry(base, null), false);
+
+  // 仅 savedAt 不同（含归一化后一致的浮点坐标）应视为相同
+  assert.equal(
+    isSameWindowGeometry(base, {
+      ...base,
+      bounds: { x: 100.2, y: 79.8, width: 1200, height: 800 },
+      savedAt: '2026-11-28T08:00:00.000Z',
+    }),
+    true,
+  );
+
+  // 坐标、尺寸、显示器、全屏、最大化任意一项变更均应返回 false
+  assert.equal(isSameWindowGeometry(base, { ...base, bounds: { ...base.bounds, x: 101 } }), false);
+  assert.equal(isSameWindowGeometry(base, { ...base, bounds: { ...base.bounds, y: 81 } }), false);
+  assert.equal(isSameWindowGeometry(base, { ...base, bounds: { ...base.bounds, width: 1201 } }), false);
+  assert.equal(isSameWindowGeometry(base, { ...base, bounds: { ...base.bounds, height: 801 } }), false);
+  assert.equal(isSameWindowGeometry(base, { ...base, display: SECOND_DISPLAY }), false);
+  assert.equal(isSameWindowGeometry(base, { ...base, display: null }), false);
+  assert.equal(isSameWindowGeometry(base, { ...base, fullscreen: true }), false);
+  assert.equal(isSameWindowGeometry(base, { ...base, maximized: true }), false);
+});
+
+test('saveMachineSettingsBackup 重复写入仅 savedAt 不同或未变更内容时不刷写文件，真实变化时正常更新', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-au-machine-geom-'));
+  const keys = [
+    'DSH_AU_LOCAL_DIR',
+    'DSH_AU_LOCAL_BINDINGS_PATH',
+    'DSH_AU_MACHINES_DIR',
+    'DSH_AU_LOCAL_POINTER_PATH',
+    'DSH_AU_LOCAL_STATE_PATH',
+  ];
+  const prev = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+  for (const k of keys) delete process.env[k];
+  process.env.DSH_AU_LOCAL_DIR = join(dir, 'local');
+  t.after(() => {
+    for (const k of keys) {
+      if (prev[k] === undefined) delete process.env[k];
+      else process.env[k] = prev[k];
+    }
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const machineId = 'win-idempotent';
+  writeActivePointer(machineId);
+
+  const initialGeom = {
+    bounds: { x: 120, y: 80, width: 1280, height: 840 },
+    display: DISPLAY,
+    fullscreen: false,
+    maximized: false,
+    savedAt: '2026-01-01T00:00:00.000Z',
+  };
+  const first = saveMachineSettingsBackup({
+    windowGeometry: initialGeom,
+    disconnectRemotesOnLock: false,
+  }, machineId);
+  assert.equal(first.ok, true);
+
+  // 固定一个旧 updatedAt 在磁盘上，确保后续同毫秒执行也能明确验证未发生覆写
+  const filePath = machineFilePath(machineId);
+  const pinned = JSON.parse(readFileSync(filePath, 'utf8'));
+  pinned.updatedAt = '2020-01-01T00:00:00.000Z';
+  const pinnedRaw = `${JSON.stringify(pinned, null, 2)}\n`;
+  writeFileSync(filePath, pinnedRaw, 'utf8');
+
+  // 1. 仅 windowGeometry.savedAt 变化：不写盘，不刷新 updatedAt 与 savedAt
+  const sameGeomNewTs = saveMachineSettingsBackup({
+    windowGeometry: { ...initialGeom, savedAt: '2026-11-28T12:00:00.000Z' },
+  }, machineId);
+  assert.equal(sameGeomNewTs.ok, true);
+  assert.equal(readFileSync(filePath, 'utf8'), pinnedRaw);
+  assert.equal(sameGeomNewTs.payload.updatedAt, '2020-01-01T00:00:00.000Z');
+  assert.equal(sameGeomNewTs.payload.windowGeometry.savedAt, '2026-01-01T00:00:00.000Z');
+
+  // 2. 传入其他未变更字段：同样跳过写盘
+  const sameFlag = saveMachineSettingsBackup({ disconnectRemotesOnLock: false }, machineId);
+  assert.equal(sameFlag.ok, true);
+  assert.equal(readFileSync(filePath, 'utf8'), pinnedRaw);
+
+  // 3. 发生真实窗口尺寸变化：正常写盘并刷新 updatedAt 与 windowGeometry.savedAt
+  const movedGeom = {
+    ...initialGeom,
+    bounds: { ...initialGeom.bounds, width: 1360 },
+    savedAt: '2026-11-28T12:05:00.000Z',
+  };
+  const updated = saveMachineSettingsBackup({ windowGeometry: movedGeom }, machineId);
+  assert.equal(updated.ok, true);
+  const after = JSON.parse(readFileSync(filePath, 'utf8'));
+  assert.equal(after.windowGeometry.bounds.width, 1360);
+  assert.equal(after.windowGeometry.savedAt, '2026-11-28T12:05:00.000Z');
+  assert.notEqual(after.updatedAt, '2020-01-01T00:00:00.000Z');
 });

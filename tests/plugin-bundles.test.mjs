@@ -1,6 +1,6 @@
 import './isolate-sync.mjs';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
@@ -626,6 +626,167 @@ test('writePluginBundle rejects plaintext credentials but allows env placeholder
     });
     assert.equal(written.hasConfig, true);
     assert.equal(readFileSync(join(written.dir, 'config.yml'), 'utf8'), safeConfig);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('writePluginBundle skips rewriting files and preserves syncedAt/syncedFrom/mtime when only syncedFrom changes', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-au-bundle-idempotent-'));
+  try {
+    const profileDir = makeProfile(dir);
+    const repoRoot = join(dir, 'repo');
+    const first = writePluginBundle({
+      repoRoot,
+      profileDir,
+      plugin: { package: PACKAGE, name: PACKAGE, version: '0.3.11', enabled: true, source: 'npm' },
+      configText: CONFIG_BLOCK,
+      patchId: 'dsh-continue',
+      syncedFrom: 'Machine-A',
+    });
+    assert.equal(first.unchanged, false);
+
+    const manifestPath = join(first.dir, 'plugin.json');
+    const readmePath = join(first.dir, 'README.md');
+    const configPath = join(first.dir, 'config.yml');
+    const manifestBefore = readFileSync(manifestPath, 'utf8');
+    const readmeBefore = readFileSync(readmePath, 'utf8');
+    const configBefore = readFileSync(configPath, 'utf8');
+    const oldTime = new Date('2020-01-01T00:00:00.000Z');
+    for (const filePath of [manifestPath, readmePath, configPath]) {
+      utimesSync(filePath, oldTime, oldTime);
+    }
+    const mtimesBefore = {
+      manifest: statSync(manifestPath).mtimeMs,
+      readme: statSync(readmePath).mtimeMs,
+      config: statSync(configPath).mtimeMs,
+    };
+
+    await new Promise((r) => setTimeout(r, 20));
+    const second = writePluginBundle({
+      repoRoot,
+      profileDir,
+      plugin: { package: PACKAGE, name: PACKAGE, version: '0.3.11', enabled: true, source: 'npm' },
+      configText: CONFIG_BLOCK,
+      patchId: 'dsh-continue',
+      syncedFrom: 'Machine-B',
+    });
+
+    assert.equal(second.unchanged, true);
+    assert.deepEqual(second.files, ['plugin.json', 'README.md', 'config.yml']);
+    assert.equal(second.manifest.syncedAt, first.manifest.syncedAt);
+    assert.equal(second.manifest.syncedFrom, 'Machine-A');
+    assert.equal(readFileSync(manifestPath, 'utf8'), manifestBefore);
+    assert.equal(readFileSync(readmePath, 'utf8'), readmeBefore);
+    assert.equal(readFileSync(configPath, 'utf8'), configBefore);
+    assert.equal(statSync(manifestPath).mtimeMs, mtimesBefore.manifest);
+    assert.equal(statSync(readmePath).mtimeMs, mtimesBefore.readme);
+    assert.equal(statSync(configPath).mtimeMs, mtimesBefore.config);
+
+    // 无 config.yml 场景同样幂等
+    const noCfgRepo = join(dir, 'repo-no-cfg');
+    const noCfgFirst = writePluginBundle({
+      repoRoot: noCfgRepo,
+      profileDir,
+      plugin: { package: PACKAGE, name: PACKAGE, version: '0.3.11', enabled: true, source: 'npm' },
+      configText: '',
+      patchId: 'dsh-continue',
+      syncedFrom: 'Machine-A',
+    });
+    assert.equal(noCfgFirst.unchanged, false);
+    const noCfgManifestPath = join(noCfgFirst.dir, 'plugin.json');
+    const noCfgReadmePath = join(noCfgFirst.dir, 'README.md');
+    utimesSync(noCfgManifestPath, oldTime, oldTime);
+    utimesSync(noCfgReadmePath, oldTime, oldTime);
+    const noCfgMtime = statSync(noCfgManifestPath).mtimeMs;
+
+    await new Promise((r) => setTimeout(r, 20));
+    const noCfgSecond = writePluginBundle({
+      repoRoot: noCfgRepo,
+      profileDir,
+      plugin: { package: PACKAGE, name: PACKAGE, version: '0.3.11', enabled: true, source: 'npm' },
+      configText: '',
+      patchId: 'dsh-continue',
+      syncedFrom: 'Machine-B',
+    });
+    assert.equal(noCfgSecond.unchanged, true);
+    assert.deepEqual(noCfgSecond.files, ['plugin.json', 'README.md']);
+    assert.equal(noCfgSecond.manifest.syncedFrom, 'Machine-A');
+    assert.equal(statSync(noCfgManifestPath).mtimeMs, noCfgMtime);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('writePluginBundle rewrites and updates syncedAt/syncedFrom when version, enabled, configText, or README changes', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-au-bundle-change-'));
+  try {
+    const profileDir = makeProfile(dir);
+    const repoRoot = join(dir, 'repo');
+    const pkgMetaPath = join(profileDir, 'node_modules', ...PACKAGE.split('/'), 'package.json');
+    const write = (overrides = {}) => writePluginBundle({
+      repoRoot,
+      profileDir,
+      plugin: { package: PACKAGE, name: PACKAGE, version: '0.3.11', enabled: true, source: 'npm', ...(overrides.plugin || {}) },
+      configText: overrides.configText !== undefined ? overrides.configText : CONFIG_BLOCK,
+      patchId: 'dsh-continue',
+      syncedFrom: overrides.syncedFrom || 'Machine-A',
+    });
+
+    const base = write();
+    assert.equal(base.unchanged, false);
+    const readmePath = join(base.dir, 'README.md');
+    const manifestPath = join(base.dir, 'plugin.json');
+
+    // 1) 仅修改 version
+    await new Promise((r) => setTimeout(r, 20));
+    const pkgMeta = JSON.parse(readFileSync(pkgMetaPath, 'utf8'));
+    writeFileSync(pkgMetaPath, JSON.stringify({ ...pkgMeta, version: '0.3.12' }), 'utf8');
+    const afterVersion = write({ plugin: { version: '0.3.12' }, syncedFrom: 'Machine-B' });
+    assert.equal(afterVersion.unchanged, false);
+    assert.equal(afterVersion.manifest.version, '0.3.12');
+    assert.equal(afterVersion.manifest.syncedFrom, 'Machine-B');
+    assert.notEqual(afterVersion.manifest.syncedAt, base.manifest.syncedAt);
+
+    // 2) 仅修改 enabled
+    await new Promise((r) => setTimeout(r, 20));
+    const afterEnabled = write({ plugin: { version: '0.3.12', enabled: false }, syncedFrom: 'Machine-C' });
+    assert.equal(afterEnabled.unchanged, false);
+    assert.equal(afterEnabled.manifest.enabled, false);
+    assert.equal(afterEnabled.manifest.syncedFrom, 'Machine-C');
+    assert.notEqual(afterEnabled.manifest.syncedAt, afterVersion.manifest.syncedAt);
+
+    // 3) 仅修改 configText
+    await new Promise((r) => setTimeout(r, 20));
+    const updatedConfig = CONFIG_BLOCK.replace('maxAttempts: 50', 'maxAttempts: 99');
+    const afterConfig = write({ plugin: { version: '0.3.12', enabled: false }, configText: updatedConfig, syncedFrom: 'Machine-D' });
+    assert.equal(afterConfig.unchanged, false);
+    assert.equal(afterConfig.manifest.syncedFrom, 'Machine-D');
+    assert.notEqual(afterConfig.manifest.syncedAt, afterEnabled.manifest.syncedAt);
+    assert.equal(readFileSync(join(base.dir, 'config.yml'), 'utf8'), updatedConfig);
+
+    // 4) 磁盘缺失 README.md 时自动补写并更新
+    rmSync(readmePath);
+    assert.equal(existsSync(readmePath), false);
+    await new Promise((r) => setTimeout(r, 20));
+    const afterMissingReadme = write({ plugin: { version: '0.3.12', enabled: false }, configText: updatedConfig, syncedFrom: 'Machine-E' });
+    assert.equal(afterMissingReadme.unchanged, false);
+    assert.equal(existsSync(readmePath), true);
+    assert.equal(afterMissingReadme.manifest.syncedFrom, 'Machine-E');
+    assert.notEqual(afterMissingReadme.manifest.syncedAt, afterConfig.manifest.syncedAt);
+    const savedManifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    assert.equal(savedManifest.syncedFrom, 'Machine-E');
+    assert.match(readFileSync(readmePath, 'utf8'), /来源机器：Machine-E/);
+
+    // 5) Windows CRLF 检出的 README.md 内容未变时同样视为 unchanged，不刷写盘
+    const crlfReadme = readFileSync(readmePath, 'utf8').replace(/\r?\n/g, '\r\n');
+    writeFileSync(readmePath, crlfReadme, 'utf8');
+    await new Promise((r) => setTimeout(r, 20));
+    const afterCrlf = write({ plugin: { version: '0.3.12', enabled: false }, configText: updatedConfig, syncedFrom: 'Machine-F' });
+    assert.equal(afterCrlf.unchanged, true);
+    assert.equal(afterCrlf.manifest.syncedFrom, 'Machine-E');
+    assert.equal(afterCrlf.manifest.syncedAt, afterMissingReadme.manifest.syncedAt);
+    assert.equal(readFileSync(readmePath, 'utf8'), crlfReadme);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
