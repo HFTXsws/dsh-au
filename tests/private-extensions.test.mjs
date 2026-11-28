@@ -182,6 +182,48 @@ test('支持声明 surfaces: ["sidebar"] 的侧边栏与主舞台扩展及 Docto
   }
 });
 
+test('sidebarTree 数据驱动侧边栏扩展可通过 Doctor，缺失时被明确拦截', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-au-sb-tree-'));
+  const treeOkDir = join(root, 'dsh-sync', 'extensions', 'sb-tree-ok');
+  const treeBadDir = join(root, 'dsh-sync', 'extensions', 'sb-tree-bad');
+  mkdirSync(treeOkDir, { recursive: true });
+  mkdirSync(treeBadDir, { recursive: true });
+
+  writeFileSync(join(treeOkDir, 'extension.json'), JSON.stringify({
+    id: 'sb-tree-ok',
+    title: '原生侧栏树扩展',
+    surfaces: ['sidebar'],
+  }), 'utf8');
+  writeFileSync(join(treeOkDir, 'client.js'), `return () => ({
+    sidebarTree: {
+      title: '原生分组',
+      badge: 1,
+      groups: [{ id: 'g1', title: '工作区', items: [{ id: 's1', title: '会话 1' }] }],
+    },
+  });`, 'utf8');
+  writeFileSync(join(treeOkDir, 'server.js'), 'export async function handleAction() { return { ok: true }; }', 'utf8');
+
+  writeFileSync(join(treeBadDir, 'extension.json'), JSON.stringify({
+    id: 'sb-tree-bad',
+    title: '缺失侧栏树与渲染器扩展',
+    surfaces: ['sidebar'],
+  }), 'utf8');
+  writeFileSync(join(treeBadDir, 'client.js'), 'return () => ({ sidebarTree: null });', 'utf8');
+
+  try {
+    const rep = await runPrivateExtensionsDoctor({ syncRepoRoot: root });
+    assert.equal(rep.ok, false);
+    const okItem = rep.extensions.find((x) => x.id === 'sb-tree-ok');
+    const badItem = rep.extensions.find((x) => x.id === 'sb-tree-bad');
+    assert.equal(okItem.status, 'ok');
+    assert.deepEqual(okItem.issues, []);
+    assert.equal(badItem.status, 'fail');
+    assert.ok(badItem.issues.some((m) => m.includes('缺少 sidebarTree 对象或 renderSidebar 函数')));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('client/src 使用的 React Hook 必须在 01-runtime.js 顶部统一解构', () => {
   const srcDir = join(process.cwd(), 'client', 'src');
   const runtimeText = readFileSync(join(srcDir, '01-runtime.js'), 'utf8');

@@ -166,6 +166,438 @@
       }
     }
 
+    function sanitizeExtIconSvg(rawSvg) {
+      if (typeof rawSvg !== 'string') return '';
+      const trimmed = rawSvg.trim();
+      if (!trimmed || !/^<svg[\s>]/i.test(trimmed) || !/<\/svg>\s*$/i.test(trimmed)) return '';
+      if (/<script\b|javascript:|on\w+\s*=|<foreignObject\b/i.test(trimmed)) return '';
+      return trimmed;
+    }
+
+    function formatExtSidebarRelativeTime(timestamp, now = Date.now()) {
+      const ts = Number(timestamp || 0);
+      if (!Number.isFinite(ts) || ts <= 0) return '';
+      const seconds = Math.max(0, Math.floor((now - ts) / 1000));
+      if (seconds < 60) return '刚刚';
+      if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+      if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
+      if (seconds < 86400 * 30) return `${Math.floor(seconds / 86400)}d`;
+      const d = new Date(ts);
+      return `${d.getMonth() + 1}/${d.getDate()}`;
+    }
+
+    function readExtSidebarExpanded(storageKey, fallback) {
+      try {
+        if (typeof localStorage === 'undefined' || typeof localStorage.getItem !== 'function') return fallback;
+        const raw = localStorage.getItem(storageKey);
+        if (raw === '1' || raw === 'true') return true;
+        if (raw === '0' || raw === 'false') return false;
+      } catch {}
+      return fallback;
+    }
+
+    function writeExtSidebarExpanded(storageKey, expanded) {
+      try {
+        if (typeof localStorage === 'undefined' || typeof localStorage.setItem !== 'function') return;
+        localStorage.setItem(storageKey, expanded ? '1' : '0');
+      } catch {}
+    }
+
+    function readExtSidebarGroupsMap(storageKey) {
+      try {
+        if (typeof localStorage === 'undefined' || typeof localStorage.getItem !== 'function') return {};
+        const raw = localStorage.getItem(storageKey);
+        if (!raw) return {};
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+      } catch {
+        return {};
+      }
+    }
+
+    function writeExtSidebarGroupsMap(storageKey, map) {
+      try {
+        if (typeof localStorage === 'undefined' || typeof localStorage.setItem !== 'function') return;
+        localStorage.setItem(storageKey, JSON.stringify(map || {}));
+      } catch {}
+    }
+
+    // 通用原生侧边栏线性 SVG 图标集（12~14px）
+    function ExtSidebarIcon({ name, size = 13 }) {
+      const common = {
+        width: size,
+        height: size,
+        viewBox: '0 0 24 24',
+        fill: 'none',
+        stroke: 'currentColor',
+        strokeWidth: 1.9,
+        strokeLinecap: 'round',
+        strokeLinejoin: 'round',
+        'aria-hidden': true,
+      };
+      switch (name) {
+        case 'chevron':
+          return h('svg', { ...common, width: 12, height: 12, strokeWidth: 2.1 }, [
+            h('polyline', { key: 'p', points: '9 6 15 12 9 18' }),
+          ]);
+        case 'folderClosed':
+          return h('svg', { ...common, width: 14, height: 14, strokeWidth: 1.8 }, [
+            h('path', { key: 'p', d: 'M3 6.5A1.5 1.5 0 0 1 4.5 5h4.38a1.5 1.5 0 0 1 1.14.52L11.5 7.5H19.5A1.5 1.5 0 0 1 21 9v9.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5v-12Z' }),
+          ]);
+        case 'folderOpen':
+          return h('svg', { ...common, width: 14, height: 14, strokeWidth: 1.8 }, [
+            h('path', { key: 'a', d: 'M3 18.5V6.5A1.5 1.5 0 0 1 4.5 5h4.38a1.5 1.5 0 0 1 1.14.52L11.5 7.5H19.5A1.5 1.5 0 0 1 21 9v2' }),
+            h('path', { key: 'b', d: 'M3 18.5 5.2 11h16.3l-2.2 7.5a1.5 1.5 0 0 1-1.44 1H4.44A1.5 1.5 0 0 1 3 18.5Z' }),
+          ]);
+        case 'plus':
+          return h('svg', common, [
+            h('line', { key: 'v', x1: 12, y1: 5, x2: 12, y2: 19 }),
+            h('line', { key: 'h', x1: 5, y1: 12, x2: 19, y2: 12 }),
+          ]);
+        case 'refresh':
+          return h('svg', common, [
+            h('path', { key: 'a', d: 'M21 12a9 9 0 1 1-2.64-6.36' }),
+            h('polyline', { key: 'b', points: '21 3 21 9 15 9' }),
+          ]);
+        case 'lock':
+          return h('svg', common, [
+            h('rect', { key: 'r', x: 5, y: 11, width: 14, height: 10, rx: 2 }),
+            h('path', { key: 'p', d: 'M8 11V7a4 4 0 0 1 8 0v4' }),
+          ]);
+        case 'unlock':
+          return h('svg', common, [
+            h('rect', { key: 'r', x: 5, y: 11, width: 14, height: 10, rx: 2 }),
+            h('path', { key: 'p', d: 'M8 11V7a4 4 0 0 1 7.8-1.2' }),
+          ]);
+        case 'settings':
+          return h('svg', common, [
+            h('circle', { key: 'c', cx: 12, cy: 12, r: 3 }),
+            h('path', { key: 'p', d: 'M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.85 1 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z' }),
+          ]);
+        default:
+          return h('svg', { ...common, width: 14, height: 14 }, [
+            h('rect', { key: 'a', x: 4, y: 4, width: 7, height: 7, rx: 1.5 }),
+            h('rect', { key: 'b', x: 13, y: 4, width: 7, height: 7, rx: 1.5 }),
+            h('rect', { key: 'c', x: 4, y: 13, width: 7, height: 7, rx: 1.5 }),
+            h('rect', { key: 'd', x: 13, y: 13, width: 7, height: 7, rx: 1.5 }),
+          ]);
+      }
+    }
+
+    /**
+     * 数据驱动的原生侧边栏扩展树渲染器（sidebarTree）：
+     * 直接复用 DSH 侧边栏分组头、文件夹行与会话行 DOM/样式，支持折叠持久化、超出截断与选中项自动展开。
+     */
+    function NativeExtensionSidebarTree({ ext, tree, active, activeStageItem, activeNativeSession, openNativeSession }) {
+      const extId = ext?.id || 'ext';
+      const topStorageKey = `dsh-au.ext-sidebar.${extId}.expanded`;
+      const groupsStorageKey = `dsh-au.ext-sidebar.${extId}.groups`;
+      const defaultTopExpanded = tree?.defaultExpanded !== false;
+
+      const [topExpanded, setTopExpanded] = useState(() => readExtSidebarExpanded(topStorageKey, defaultTopExpanded));
+      const [groupExpandedMap, setGroupExpandedMap] = useState(() => readExtSidebarGroupsMap(groupsStorageKey));
+      const [expandedMoreMap, setExpandedMoreMap] = useState({});
+
+      const safeSvg = useMemo(() => sanitizeExtIconSvg(ext?.iconSvg), [ext?.iconSvg]);
+      const groups = Array.isArray(tree?.groups) ? tree.groups : [];
+      const flatItems = Array.isArray(tree?.items) ? tree.items : [];
+
+      const isItemSelected = useCallback((item) => {
+        if (!item) return false;
+        if (typeof item.selected === 'boolean') return item.selected;
+        return Boolean(
+          (activeNativeSession?.extId === extId && activeNativeSession?.itemId === item.id)
+          || (active && activeStageItem === item.id)
+        );
+      }, [active, activeNativeSession, activeStageItem, extId]);
+
+      // 当被选中的会话位于折叠分组或截断区时，自动展开对应层级以确保可见
+      const selectedSignature = useMemo(() => {
+        for (const group of groups) {
+          const items = Array.isArray(group?.items) ? group.items : [];
+          const idx = items.findIndex((it) => isItemSelected(it));
+          if (idx >= 0) {
+            const limit = Number.isFinite(Number(group?.defaultVisibleCount)) && Number(group.defaultVisibleCount) > 0
+              ? Math.floor(Number(group.defaultVisibleCount))
+              : 5;
+            return `g:${group.id}:${items[idx]?.id || idx}:${idx >= limit ? 1 : 0}`;
+          }
+        }
+        const flatIdx = flatItems.findIndex((it) => isItemSelected(it));
+        if (flatIdx >= 0) {
+          const limit = Number.isFinite(Number(tree?.defaultVisibleCount)) && Number(tree.defaultVisibleCount) > 0
+            ? Math.floor(Number(tree.defaultVisibleCount))
+            : 5;
+          return `f:${flatItems[flatIdx]?.id || flatIdx}:${flatIdx >= limit ? 1 : 0}`;
+        }
+        return '';
+      }, [flatItems, groups, isItemSelected, tree?.defaultVisibleCount]);
+
+      useEffect(() => {
+        if (!selectedSignature) return;
+        const parts = selectedSignature.split(':');
+        const kind = parts[0];
+        const needsMore = parts[parts.length - 1] === '1';
+        setTopExpanded((prev) => {
+          if (prev) return prev;
+          writeExtSidebarExpanded(topStorageKey, true);
+          return true;
+        });
+        if (kind === 'g') {
+          const groupId = parts.slice(1, -2).join(':');
+          if (groupId) {
+            setGroupExpandedMap((prev) => {
+              if (prev[groupId] === true) return prev;
+              const next = { ...prev, [groupId]: true };
+              writeExtSidebarGroupsMap(groupsStorageKey, next);
+              return next;
+            });
+            if (needsMore) {
+              const moreKey = `group:${groupId}`;
+              setExpandedMoreMap((prev) => (prev[moreKey] ? prev : { ...prev, [moreKey]: true }));
+            }
+          }
+        } else if (kind === 'f' && needsMore) {
+          setExpandedMoreMap((prev) => (prev.__root__ ? prev : { ...prev, __root__: true }));
+        }
+      }, [groupsStorageKey, selectedSignature, topStorageKey]);
+
+      const toggleTopExpanded = useCallback(() => {
+        setTopExpanded((prev) => {
+          const next = !prev;
+          writeExtSidebarExpanded(topStorageKey, next);
+          return next;
+        });
+      }, [topStorageKey]);
+
+      const toggleGroupExpanded = useCallback((groupId, currentExpanded) => {
+        setGroupExpandedMap((prev) => {
+          const next = { ...prev, [groupId]: !currentExpanded };
+          writeExtSidebarGroupsMap(groupsStorageKey, next);
+          return next;
+        });
+      }, [groupsStorageKey]);
+
+      const toggleMore = useCallback((scopeKey) => {
+        setExpandedMoreMap((prev) => ({ ...prev, [scopeKey]: !prev[scopeKey] }));
+      }, []);
+
+      const renderSessionRow = (item, idx, keyPrefix) => {
+        if (!item) return null;
+        const selected = isItemSelected(item);
+        const status = typeof item.status === 'string' ? item.status.trim().toLowerCase() : 'idle';
+        const showDot = status === 'busy' || status === 'running' || status === 'waiting' || status === 'error';
+        const timeText = formatExtSidebarRelativeTime(item.updatedAt);
+        const rowTitle = item.subtitle ? `${item.title} · ${item.subtitle}` : (item.title || '');
+        return h('div', {
+          key: `${keyPrefix}:${item.id || idx}`,
+          role: 'treeitem',
+          'aria-selected': selected,
+          className: `dsh-au-remote-session-row${selected ? ' selected' : ''}`,
+          title: rowTitle,
+          onClick: (event) => {
+            event.stopPropagation();
+            if (typeof item.onClick === 'function') {
+              item.onClick();
+            } else if (typeof openNativeSession === 'function') {
+              openNativeSession(item.id, { title: item.title });
+            }
+          },
+        }, [
+          h('span', { key: 'leading', className: 'dsh-au-remote-session-leading' },
+            showDot
+              ? h('span', { className: `dsh-au-remote-session-dot ${status}`, title: status })
+              : null),
+          h('span', { key: 'title', className: 'dsh-au-remote-session-title' }, item.title || item.id || ''),
+          timeText ? h('span', { key: 'time', className: 'dsh-au-remote-session-time' }, timeText) : null,
+        ]);
+      };
+
+      const headerActions = Array.isArray(tree?.headerActions) ? tree.headerActions : [];
+      const hasBadge = tree?.badge !== undefined && tree?.badge !== null && tree?.badge !== '';
+      const actionRow = tree?.actionRow && typeof tree.actionRow === 'object' && tree.actionRow.label
+        ? tree.actionRow
+        : null;
+      const flatLimit = Number.isFinite(Number(tree?.defaultVisibleCount)) && Number(tree.defaultVisibleCount) > 0
+        ? Math.floor(Number(tree.defaultVisibleCount))
+        : 5;
+      const flatShowAll = Boolean(expandedMoreMap.__root__);
+      const visibleFlatItems = flatShowAll ? flatItems : flatItems.slice(0, flatLimit);
+      const hiddenFlatCount = Math.max(0, flatItems.length - visibleFlatItems.length);
+      const showEmpty = !actionRow && groups.length === 0 && flatItems.length === 0 && Boolean(tree?.emptyText);
+
+      return h('div', {
+        className: 'dsh-au-ext-sidebar-wrap',
+        'data-ext-sidebar-id': extId,
+      }, [
+        h('div', {
+          key: 'header',
+          className: 'dsh-au-ws-device-group-wrap',
+        }, [
+          h('button', {
+            key: 'toggle',
+            type: 'button',
+            className: 'dsh-au-ws-device-group',
+            'aria-expanded': topExpanded,
+            onClick: toggleTopExpanded,
+          }, [
+            h('span', { key: 'chev', className: 'dsh-au-ws-device-group-chevron' },
+              h(ExtSidebarIcon, { name: 'chevron', size: 12 })),
+            h('span', { key: 'icon', className: 'dsh-au-ws-device-group-icon' },
+              safeSvg
+                ? h('span', {
+                    style: { display: 'inline-flex', width: '14px', height: '14px', alignItems: 'center', justifyContent: 'center' },
+                    dangerouslySetInnerHTML: { __html: safeSvg },
+                  })
+                : h(ExtSidebarIcon, { name: 'defaultExt', size: 14 })),
+            h('span', { key: 'label', className: 'dsh-au-ws-device-group-label' },
+              tree?.title || ext?.title || extId),
+            hasBadge
+              ? h('span', { key: 'badge', className: 'dsh-au-ws-device-group-count' }, String(tree.badge))
+              : null,
+          ]),
+          headerActions.length > 0
+            ? h('div', {
+                key: 'actions',
+                className: 'dsh-au-ws-device-group-actions',
+                onClick: (event) => event.stopPropagation(),
+              }, headerActions.map((act, idx) => h('button', {
+                key: act?.id || idx,
+                type: 'button',
+                className: 'dsh-au-ws-device-group-action-btn',
+                title: act?.title || '',
+                'aria-label': act?.title || act?.id || '',
+                disabled: Boolean(act?.disabled),
+                onClick: (event) => {
+                  event.stopPropagation();
+                  if (!act?.disabled && typeof act?.onClick === 'function') act.onClick();
+                },
+              }, h(ExtSidebarIcon, { name: act?.icon, size: 13 }))))
+            : null,
+        ]),
+        topExpanded
+          ? h(React.Fragment, { key: 'body' }, [
+              actionRow
+                ? h('button', {
+                    key: 'action-row',
+                    type: 'button',
+                    className: 'dsh-au-ext-action-row',
+                    title: actionRow.title || actionRow.label,
+                    onClick: (event) => {
+                      event.stopPropagation();
+                      if (typeof actionRow.onClick === 'function') actionRow.onClick();
+                    },
+                  }, [
+                    h('span', { key: 'icon', className: 'dsh-au-ext-action-row-icon' },
+                      h(ExtSidebarIcon, { name: actionRow.icon || 'lock', size: 13 })),
+                    h('span', { key: 'label', className: 'dsh-au-ext-action-row-label' }, actionRow.label),
+                  ])
+                : null,
+              groups.length > 0
+                ? groups.map((group, gIdx) => {
+                    if (!group) return null;
+                    const groupId = String(group.id || gIdx);
+                    const groupExpanded = typeof groupExpandedMap[groupId] === 'boolean'
+                      ? groupExpandedMap[groupId]
+                      : (group.defaultExpanded !== false);
+                    const groupItems = Array.isArray(group.items) ? group.items : [];
+                    const isGroupActive = groupItems.some((it) => isItemSelected(it));
+                    const hasRunning = groupItems.some((it) => it?.status === 'busy' || it?.status === 'running' || it?.status === 'waiting');
+                    const groupActions = Array.isArray(group.actions) ? group.actions : [];
+                    const groupLimit = Number.isFinite(Number(group.defaultVisibleCount)) && Number(group.defaultVisibleCount) > 0
+                      ? Math.floor(Number(group.defaultVisibleCount))
+                      : 5;
+                    const moreKey = `group:${groupId}`;
+                    const showAll = Boolean(expandedMoreMap[moreKey]);
+                    const visibleItems = showAll ? groupItems : groupItems.slice(0, groupLimit);
+                    const hiddenCount = Math.max(0, groupItems.length - visibleItems.length);
+
+                    return h('div', {
+                      key: `group:${groupId}`,
+                      className: 'dsh-au-remote-ws-item dsh-au-ws-grouped-item',
+                    }, [
+                      h('div', {
+                        key: 'row',
+                        role: 'treeitem',
+                        'aria-expanded': groupExpanded,
+                        className: `dsh-au-remote-ws-row${groupExpanded ? ' expanded' : ''}${isGroupActive ? ' active' : ''}`,
+                        title: group.subtitle ? `${group.title} (${group.subtitle})` : (group.title || groupId),
+                        onClick: () => toggleGroupExpanded(groupId, groupExpanded),
+                      }, [
+                        h('span', {
+                          key: 'leading',
+                          className: `dsh-au-remote-ws-leading${isGroupActive || hasRunning ? ' highlight' : ''}`,
+                        }, [
+                          h('span', { key: 'folder', className: 'dsh-au-remote-ws-folder-icon' },
+                            h(ExtSidebarIcon, { name: groupExpanded ? 'folderOpen' : 'folderClosed', size: 14 })),
+                          h('span', { key: 'chevron', className: `dsh-au-remote-ws-chevron-icon${groupExpanded ? ' expanded' : ''}` },
+                            h(ExtSidebarIcon, { name: 'chevron', size: 12 })),
+                        ]),
+                        h('div', { key: 'main', className: 'dsh-au-remote-ws-main' }, [
+                          h('span', { key: 'title', className: 'dsh-au-remote-ws-title' }, group.title || groupId),
+                        ]),
+                        groupActions.length > 0
+                          ? h('div', {
+                              key: 'actions',
+                              className: 'dsh-au-remote-ws-actions',
+                              onClick: (event) => event.stopPropagation(),
+                            }, groupActions.map((act, aIdx) => h('button', {
+                              key: act?.id || aIdx,
+                              type: 'button',
+                              className: 'dsh-au-remote-ws-action-btn',
+                              title: act?.title || '',
+                              'aria-label': act?.title || act?.id || '',
+                              disabled: Boolean(act?.disabled),
+                              onClick: (event) => {
+                                event.stopPropagation();
+                                if (!act?.disabled && typeof act?.onClick === 'function') act.onClick();
+                              },
+                            }, h(ExtSidebarIcon, { name: act?.icon, size: 13 }))))
+                          : null,
+                      ]),
+                      groupExpanded && groupItems.length > 0
+                        ? h('div', { key: 'items', className: 'dsh-au-remote-session-list', role: 'group' }, [
+                            ...visibleItems.map((item, iIdx) => renderSessionRow(item, iIdx, `g:${groupId}`)),
+                            groupItems.length > groupLimit
+                              ? h('button', {
+                                  key: 'more',
+                                  type: 'button',
+                                  className: 'dsh-au-ext-more-btn',
+                                  onClick: (event) => {
+                                    event.stopPropagation();
+                                    toggleMore(moreKey);
+                                  },
+                                }, showAll ? '收起' : `展开其余 ${hiddenCount} 个会话`)
+                              : null,
+                          ])
+                        : null,
+                    ]);
+                  })
+                : null,
+              flatItems.length > 0
+                ? h('div', { key: 'flat-items', className: 'dsh-au-remote-session-list', role: 'group' }, [
+                    ...visibleFlatItems.map((item, iIdx) => renderSessionRow(item, iIdx, 'flat')),
+                    flatItems.length > flatLimit
+                      ? h('button', {
+                          key: 'flat-more',
+                          type: 'button',
+                          className: 'dsh-au-ext-more-btn',
+                          onClick: (event) => {
+                            event.stopPropagation();
+                            toggleMore('__root__');
+                          },
+                        }, flatShowAll ? '收起' : `展开其余 ${hiddenFlatCount} 个会话`)
+                      : null,
+                  ])
+                : null,
+              showEmpty
+                ? h('div', { key: 'empty', className: 'dsh-au-ext-empty-hint' }, tree.emptyText)
+                : null,
+            ])
+          : null,
+      ]);
+    }
+
     /**
      * 私人仓库侧边栏扩展运行器：与工作台共享同一编译契约，同时向扩展注入
      * selectStageItem / openNativeSession / clearStage / activeStageItem / activeNativeSession，
@@ -213,9 +645,24 @@
       runtimesRef.current[ext.id] = runtime;
       useEffect(() => () => { delete runtimesRef.current[ext.id]; }, [ext.id, runtimesRef]);
 
-      // 侧边栏节点：直接在 Runner 渲染并通过 Portal 挂载到侧边栏宿主，保证内部状态同步更新
-      const sidebarPortal = mountNode && typeof ReactDOM?.createPortal === 'function' && typeof runtime?.renderSidebar === 'function'
-        ? ReactDOM.createPortal(h(React.Fragment, { key: `sb-ext-${ext.id}` }, runtime.renderSidebar()), mountNode)
+      // 侧边栏节点：优先保持自定义 renderSidebar 向后兼容，默认推荐通过 sidebarTree 走纯原生渲染器
+      const hasCustomSidebar = typeof runtime?.renderSidebar === 'function';
+      const hasSidebarTree = Boolean(runtime?.sidebarTree && typeof runtime.sidebarTree === 'object');
+      const sidebarPortal = mountNode && typeof ReactDOM?.createPortal === 'function' && (hasCustomSidebar || hasSidebarTree)
+        ? ReactDOM.createPortal(
+            hasCustomSidebar
+              ? h(React.Fragment, { key: `sb-ext-${ext.id}` }, runtime.renderSidebar())
+              : h(NativeExtensionSidebarTree, {
+                  key: `sb-ext-${ext.id}`,
+                  ext,
+                  tree: runtime.sidebarTree,
+                  active,
+                  activeStageItem,
+                  activeNativeSession,
+                  openNativeSession,
+                }),
+            mountNode
+          )
         : null;
 
       // 主舞台节点：当前扩展处于激活且允许展示时，直接在 Runner 同步渲染并通过 Portal 挂载到舞台宿主，彻底消除 useEffect 跨组件异步延迟导致输入法候选框被重置
