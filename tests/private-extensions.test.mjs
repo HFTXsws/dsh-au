@@ -1,16 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  clearExtSecrets,
+  createExtSecretStore,
+  deleteExtSecret,
+  getExtSecret,
+  listExtSecretKeys,
+  resolveExtSecretsPath,
+  setExtSecret,
+} from '../lib/ext-secrets.js';
+import {
+  hasPrivateExtensionStream,
   invokePrivateExtensionAction,
+  invokePrivateExtensionStream,
   listPrivateExtensionsForClient,
   loadPrivateExtensionDescriptors,
   normalizeExtensionSurfaces,
   runPrivateExtensionsDoctor,
 } from '../lib/private-extensions.js';
 import {
+  BRIDGED_EXT_LLM_PROVIDER,
   isBridgedExtSessionId,
   toBridgedDshSessionId,
   groupEntriesIntoTurns,
@@ -268,4 +280,242 @@ test('外部会话原生转接层将 Claude / GrokBot 历史投影为 DSH v4 事
   assert.equal(syncRes.persisted, true);
   assert.equal(createdEvents.length, events.length);
   assert.equal(createdHeader?.id, bridgedId);
+});
+
+test('ext-secrets.js 命名空间隔离、读写删、listKeys 与非法参数校验', () => {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-au-secrets-'));
+  const secretsPath = join(root, 'nested', 'ext-secrets.json');
+  const prevEnv = process.env.DSH_AU_EXT_SECRETS_PATH;
+
+  try {
+    process.env.DSH_AU_EXT_SECRETS_PATH = join(root, 'env-secrets.json');
+    assert.equal(resolveExtSecretsPath(), join(root, 'env-secrets.json'));
+    assert.equal(resolveExtSecretsPath({ secretsPath }), secretsPath);
+
+    const storeA = createExtSecretStore('ext-alpha', { secretsPath });
+    const storeB = createExtSecretStore('ext-beta', { secretsPath });
+
+    assert.equal(storeA.has('api.token'), false);
+    assert.equal(storeA.get('api.token'), '');
+
+    assert.deepEqual(storeA.set('api.token', 'secret-a-123'), { ok: true });
+    assert.deepEqual(storeA.set('endpoint_url', 'https://example.invalid'), { ok: true });
+    assert.deepEqual(storeB.set('api.token', 'secret-b-999'), { ok: true });
+
+    // 命名空间互不干扰，且 listKeys 仅返回键名
+    assert.equal(storeA.get('api.token'), 'secret-a-123');
+    assert.equal(storeB.get('api.token'), 'secret-b-999');
+    assert.equal(storeA.has('api.token'), true);
+    assert.deepEqual(storeA.listKeys(), ['api.token', 'endpoint_url']);
+    assert.deepEqual(listExtSecretKeys('ext-beta', { secretsPath }), ['api.token']);
+
+    // 空字符串视为删除
+    storeA.set('endpoint_url', '');
+    assert.equal(storeA.has('endpoint_url'), false);
+    assert.deepEqual(storeA.listKeys(), ['api.token']);
+
+    // 删除与清空
+    deleteExtSecret('ext-alpha', 'api.token', { secretsPath });
+    assert.equal(getExtSecret('ext-alpha', 'api.token', { secretsPath }), '');
+    assert.equal(getExtSecret('ext-beta', 'api.token', { secretsPath }), 'secret-b-999');
+    clearExtSecrets('ext-beta', { secretsPath });
+    assert.deepEqual(storeB.listKeys(), []);
+
+    if (process.platform !== 'win32') {
+      assert.equal(statSync(secretsPath).mode & 0o777, 0o600);
+    }
+
+    // 非法 ID / Key 拒绝
+    assert.throws(() => createExtSecretStore('../bad', { secretsPath }), /非法扩展 ID/);
+    assert.throws(() => setExtSecret('BadUpper', 'token', '1', { secretsPath }), /非法扩展 ID/);
+    assert.throws(() => storeA.set('__proto__', 'x'), /非法私密存储键名/);
+    assert.throws(() => storeA.set('bad/key', 'x'), /非法私密存储键名/);
+    assert.throws(() => storeA.get('constructor'), /非法私密存储键名/);
+  } finally {
+    if (prevEnv === undefined) delete process.env.DSH_AU_EXT_SECRETS_PATH;
+    else process.env.DSH_AU_EXT_SECRETS_PATH = prevEnv;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('invokePrivateExtensionAction 注入 ctx.secrets 且 Doctor 兼容检查 streamAction', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-au-ext-sec-'));
+  const secretsPath = join(root, 'secrets.json');
+  const okDir = join(root, 'dsh-sync', 'extensions', 'sec-ext');
+  const warnDir = join(root, 'dsh-sync', 'extensions', 'warn-stream-ext');
+  mkdirSync(okDir, { recursive: true });
+  mkdirSync(warnDir, { recursive: true });
+
+  writeFileSync(join(okDir, 'extension.json'), JSON.stringify({
+    id: 'sec-ext',
+    title: '安全存储测试扩展',
+  }), 'utf8');
+  writeFileSync(join(okDir, 'client.js'), 'return () => ({ renderCenter: () => null });', 'utf8');
+  writeFileSync(join(okDir, 'server.js'), `
+    export async function handleAction({ action, body, ctx }) {
+      if (action === 'save') {
+        ctx.secrets.set(body.key, body.value);
+        return { ok: true, keys: ctx.secrets.listKeys() };
+      }
+      if (action === 'read') {
+        return { ok: true, val: ctx.secrets.get(body.key) };
+      }
+      return { ok: false, error: 'unknown' };
+    }
+  `, 'utf8');
+
+  writeFileSync(join(warnDir, 'extension.json'), JSON.stringify({
+    id: 'warn-stream',
+    title: '非函数流扩展',
+  }), 'utf8');
+  writeFileSync(join(warnDir, 'client.js'), 'return () => ({ renderCenter: () => null });', 'utf8');
+  writeFileSync(join(warnDir, 'server.js'), `
+    export const streamAction = 'not-a-function';
+    export async function handleAction() { return { ok: true }; }
+  `, 'utf8');
+
+  try {
+    const saveRes = await invokePrivateExtensionAction('sec-ext', 'save', { key: 'apiKey', value: 'v-42' }, {}, { syncRepoRoot: root, secretsPath });
+    assert.deepEqual(saveRes, { ok: true, keys: ['apiKey'] });
+    const readRes = await invokePrivateExtensionAction('sec-ext', 'read', { key: 'apiKey' }, {}, { syncRepoRoot: root, secretsPath });
+    assert.deepEqual(readRes, { ok: true, val: 'v-42' });
+
+    // invokePrivateExtensionStream 对未导出 streamAction 的扩展自动回退 handleAction
+    assert.equal(await hasPrivateExtensionStream('sec-ext', { syncRepoRoot: root }), false);
+    const doc = await runPrivateExtensionsDoctor({ syncRepoRoot: root });
+    assert.equal(doc.ok, true);
+    const warnItem = doc.extensions.find((x) => x.id === 'warn-stream');
+    assert.equal(warnItem.status, 'warn');
+    assert.ok(warnItem.warnings.some((w) => w.includes('streamAction')));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('installExtNativeSessionBridge 动态解析标题、拒绝无分隔符模型并支持 streamAction 流式对话与回退', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-au-bridge-stream-'));
+  const streamDir = join(root, 'dsh-sync', 'extensions', 'stream-ext');
+  const legacyDir = join(root, 'dsh-sync', 'extensions', 'legacy-ext');
+  mkdirSync(streamDir, { recursive: true });
+  mkdirSync(legacyDir, { recursive: true });
+
+  writeFileSync(join(streamDir, 'extension.json'), JSON.stringify({
+    id: 'stream-ext',
+    title: '流式远程助手',
+    surfaces: ['sidebar'],
+  }), 'utf8');
+  writeFileSync(join(streamDir, 'client.js'), 'return () => ({ renderSidebar: () => null, renderStage: () => null });', 'utf8');
+  writeFileSync(join(streamDir, 'server.js'), `
+    export const interrupted = [];
+    export async function handleAction({ action, body }) {
+      if (action === 'interruptRun') {
+        interrupted.push(body?.sessionId || '');
+        return { ok: true };
+      }
+      return { ok: true, reply: 'fallback-unused' };
+    }
+    export async function* streamAction({ action, body, signal }) {
+      if (action !== 'sendMessage') return;
+      yield { type: 'text-delta', text: '第一段:' + (body?.text || '') };
+      yield '第二段';
+      if (!signal?.aborted) {
+        yield { type: 'text-delta', text: ':完成' };
+      }
+    }
+  `, 'utf8');
+
+  writeFileSync(join(legacyDir, 'extension.json'), JSON.stringify({
+    id: 'legacy-ext',
+    title: '传统同步助手',
+    surfaces: ['sidebar'],
+  }), 'utf8');
+  writeFileSync(join(legacyDir, 'client.js'), 'return () => ({ renderSidebar: () => null, renderStage: () => null });', 'utf8');
+  writeFileSync(join(legacyDir, 'server.js'), `
+    export async function handleAction({ action, body }) {
+      if (action === 'sendMessage') {
+        return { ok: true, reply: '同步回复:' + (body?.text || '') };
+      }
+      return { ok: true };
+    }
+  `, 'utf8');
+
+  let registeredAdapter = null;
+  const mockCtx = {
+    llm: {
+      registerAdapter(providers, adapter) {
+        assert.deepEqual(providers, [BRIDGED_EXT_LLM_PROVIDER]);
+        registeredAdapter = adapter;
+        return () => { registeredAdapter = null; };
+      },
+    },
+  };
+
+  const dispose = installExtNativeSessionBridge(mockCtx, { syncRepoRoot: root });
+  try {
+    assert.ok(registeredAdapter);
+
+    // 1. resolveModel 动态返回扩展 title，不再硬编码 Claude
+    const streamModel = await registeredAdapter.resolveModel(BRIDGED_EXT_LLM_PROVIDER, 'stream-ext::item-1');
+    assert.equal(streamModel.name, '流式远程助手');
+    const legacyModel = await registeredAdapter.resolveModel(BRIDGED_EXT_LLM_PROVIDER, 'legacy-ext::item-2');
+    assert.equal(legacyModel.name, '传统同步助手');
+    const unknownModel = await registeredAdapter.resolveModel(BRIDGED_EXT_LLM_PROVIDER, 'unknown-ext::item-3');
+    assert.equal(unknownModel.name, 'unknown-ext');
+
+    // 2. streamAction 逐块流式产出与汇总 block-end
+    assert.equal(await hasPrivateExtensionStream('stream-ext', { syncRepoRoot: root }), true);
+    const streamChunks = [];
+    for await (const chunk of registeredAdapter.stream({
+      model: 'stream-ext::item-1',
+      messages: [{ role: 'user', content: [{ type: 'text', text: '你好' }] }],
+    })) {
+      streamChunks.push(chunk);
+    }
+    const deltas = streamChunks.filter((c) => c.type === 'text-delta').map((c) => c.text);
+    assert.deepEqual(deltas, ['第一段:你好', '第二段', ':完成']);
+    const blockEnd = streamChunks.find((c) => c.type === 'block-end');
+    assert.equal(blockEnd?.block?.text, '第一段:你好第二段:完成');
+    assert.equal(streamChunks.at(-1)?.type, 'finish');
+
+    // 3. 未导出 streamAction 时兼容回退 handleAction
+    const legacyChunks = [];
+    for await (const chunk of registeredAdapter.stream({
+      model: 'legacy-ext::item-2',
+      messages: [{ role: 'user', content: [{ type: 'text', text: '测试回退' }] }],
+    })) {
+      legacyChunks.push(chunk);
+    }
+    assert.deepEqual(
+      legacyChunks.filter((c) => c.type === 'text-delta').map((c) => c.text),
+      ['同步回复:测试回退'],
+    );
+    assert.equal(legacyChunks.find((c) => c.type === 'block-end')?.block?.text, '同步回复:测试回退');
+
+    // 4. 无 :: 分隔符返回清晰错误，不硬编码回退
+    const invalidChunks = [];
+    for await (const chunk of registeredAdapter.stream({
+      model: 'missing-separator',
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+    })) {
+      invalidChunks.push(chunk);
+    }
+    const invalidEnd = invalidChunks.find((c) => c.type === 'block-end');
+    assert.match(invalidEnd?.block?.text || '', /无效的外部扩展会话模型标识/);
+
+    // 5. 直接调用 invokePrivateExtensionStream 时未导出 streamAction 也会回退到 handleAction 单块输出
+    const directFallback = [];
+    for await (const chunk of invokePrivateExtensionStream(
+      'legacy-ext',
+      'sendMessage',
+      { text: '直连' },
+      {},
+      { syncRepoRoot: root },
+    )) {
+      directFallback.push(chunk);
+    }
+    assert.deepEqual(directFallback, [{ type: 'text-delta', text: '同步回复:直连' }]);
+  } finally {
+    dispose();
+    rmSync(root, { recursive: true, force: true });
+  }
 });
